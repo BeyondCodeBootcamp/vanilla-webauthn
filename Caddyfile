@@ -1,0 +1,9 @@
+https://local.pocketid.app {
+	tls internal
+	handle /* {
+		root * ./
+		file_server {
+			browse
+		}
+	}
+}

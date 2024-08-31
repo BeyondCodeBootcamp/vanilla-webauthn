@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+set -u
+
+# caddy file-server --browse --root .
+caddy run --config ./Caddyfile --adapter caddyfile
