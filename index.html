@@ -99,11 +99,20 @@
             <small>(Keypass Prompt Style)</small>
             <select name="mediation" onchange="setMediation(event)">
               <option value="conditional" selected>
-                Conditional (Autocomplete Keypass)
+                conditional (Autocomplete Keypass)
               </option>
-              <option value="silent">Silent*</option>
-              <option value="optional">Optional (Prompt for Keypass)</option>
-              <option value="required">Required*</option>
+              <option value="silent">silent*</option>
+              <option value="optional">optional (Prompt for Keypass)</option>
+              <option value="required">required*</option>
+            </select>
+          </label>
+          <label
+            >Attachment Type:
+            <small>Computer (or Phone), or Key (or Tag)</small>
+            <select name="attachment" onchange="setAttachment(event)">
+              <option value="" selected>(allow all)</option>
+              <option value="platform">platform (computer, phone)</option>
+              <option value="cross-platform">cross-platform (key, tag)</option>
             </select>
           </label>
           <label data-id="username">

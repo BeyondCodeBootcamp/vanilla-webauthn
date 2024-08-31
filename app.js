@@ -23,6 +23,7 @@ let challenge = new Uint8Array(32);
 let emptyUserId = new Uint8Array(0);
 /** @type {CredentialMediationRequirement} */
 let currentMediation = "optional";
+let currentAttachment = "";
 let abortController = new AbortController();
 
 let relyingParty = {
@@ -50,7 +51,6 @@ let defaultCreateOrReplaceCredOpts = {
   publicKey: {
     attestation: "none",
     // attestationFormats: [],
-    // allowCredentials: [],
     authenticatorSelection: {
       // leave empty to allow either OS/Browser (platform) or Key (BLE, FIDO)
       // authenticatorAttachment: "platform", // "cross-platform" key-only
@@ -172,7 +172,12 @@ function logAuthResponse(authResp) {
   console.log("signature (salted):", sigHex);
 }
 
-Object.assign(window, { createOrReplacePublicKey, getPublicKey, setMediation });
+Object.assign(window, {
+  createOrReplacePublicKey,
+  getPublicKey,
+  setMediation,
+  setAttachment,
+});
 
 async function createOrReplacePublicKey(event) {
   event.preventDefault();
@@ -182,6 +187,11 @@ async function createOrReplacePublicKey(event) {
   abortController.abort();
   abortController = new AbortController();
   credOpts.signal = abortController.signal;
+  if (currentAttachment) {
+    let attachment = currentAttachment;
+    //@ts-ignore
+    credOpts.publicKey.authenticatorSelection.attachment = attachment;
+  }
 
   void globalThis.crypto.getRandomValues(challenge);
   if (!credOpts.publicKey) {
@@ -281,6 +291,22 @@ async function getPublicKey() {
 
   logAuthResponse(credential);
   console.log("WebAuthn successful", credential);
+}
+
+async function setAttachment() {
+  //@ts-ignore
+  let newAttachment = $('select[name="attachment"]').value || "";
+  if (!newAttachment) {
+    throw new Error("attachment option box must exist");
+  }
+  currentAttachment = newAttachment;
+
+  if (newAttachment === "conditional") {
+    abortController.abort();
+    abortController = new AbortController();
+    void enableWebAuthnAutofill();
+    return;
+  }
 }
 
 async function setMediation() {
