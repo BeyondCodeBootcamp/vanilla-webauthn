@@ -304,7 +304,7 @@ async function setAttachment() {
   if (newAttachment === "conditional") {
     abortController.abort();
     abortController = new AbortController();
-    void enableWebAuthnAutofill();
+    void enableWebAuthnAutocomplete();
     return;
   }
 }
