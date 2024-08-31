@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebAuthn Demo</title>
+    <link rel="shortcut icon" href="./favicon.png" />
+    <link rel="stylesheet" href="./mvp.css" />
+    <style>
+      nav {
+        margin-bottom: 0.3rem;
+      }
+      header {
+        padding-top: 0;
+        padding-bottom: 0.3rem;
+      }
+      header nav img {
+        margin: 0;
+      }
+      main {
+        padding-top: 0;
+      }
+      form {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      hr,
+      footer hr {
+        margin-top: 1.2rem;
+        margin-bottom: 1.2rem;
+      }
+      footer {
+        padding: 1rem;
+      }
+      pre {
+        margin: 0;
+        padding: 0;
+      }
+      pre code {
+        margin: 0;
+        padding: 0.3rem 1rem 0.3rem 1rem;
+      }
+      code {
+        margin: 0.1rem;
+        padding: 0rem 0.3rem 0rem 0.3rem;
+      }
+      small button {
+        font-size: 0.75rem;
+        margin: 0;
+        padding: 0.2rem;
+      }
+      fieldset {
+        border-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      fieldset label,
+      fieldset button {
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section>
+        <header>
+          <nav>
+            <a href="https://github.com/BeyondCodeBootcamp/vanilla-webauthn"
+              ><img
+                alt="Vanilla WebAuthn Demo"
+                src="./pocketid-logo.svg"
+                height="48"
+              />
+              <!-- I think this is the Blood Type emjoi?? -->
+              <!-- span style="font-size: 4em"> 🅱 </span -->
+            </a>
+            <h1>Vanilla WebAuthn Demo</h1>
+            <ul>
+              <li>
+                <a href="https://github.com/BeyondCodeBootcamp/vanilla-webauthn"
+                  >Git Source</a
+                >
+              </li>
+            </ul>
+          </nav>
+          <p>
+            Although the spec is a bit hard to grok...
+            <br />
+            <strong>The implementation is easy!</strong>
+            <mark>You can do it!</mark>
+            <br />
+          </p>
+        </header>
+
+        <form id="login-form" onsubmit="createOrReplacePublicKey(event)">
+          <h2>Select Account</h2>
+          <label
+            >Mediation Type:
+            <small>(Keypass Prompt Style)</small>
+            <select name="mediation" onchange="setMediation(event)">
+              <option value="conditional" selected>
+                Conditional (Autocomplete Keypass)
+              </option>
+              <option value="silent">Silent*</option>
+              <option value="optional">Optional (Prompt for Keypass)</option>
+              <option value="required">Required*</option>
+            </select>
+          </label>
+          <label data-id="username">
+            Email / Username:
+            <input
+              type="text"
+              id="username"
+              name="username"
+              autocomplete="username webauthn"
+              required
+            />
+          </label>
+          <button
+            data-id="authenticate"
+            type="button"
+            onclick="getPublicKey(event)"
+          >
+            Sign In with Passkey
+          </button>
+          <button data-id="register" type="submit">Register New Account</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
