@@ -11,7 +11,7 @@ function $(cssSelector, $parent = document) {
 }
 
 let textEncoder = new TextEncoder();
-let textDecoder = new TextDecoder();
+// let textDecoder = new TextDecoder();
 
 // https://www.iana.org/assignments/cose/cose.xhtml#algorithms
 const COSE_ES256 = -7;
@@ -24,6 +24,7 @@ let emptyUserId = new Uint8Array(0);
 /** @type {CredentialMediationRequirement} */
 let currentMediation = "optional";
 let currentAttachment = "";
+let currentAbort = "";
 let abortController = new AbortController();
 
 let relyingParty = {
@@ -35,6 +36,7 @@ let relyingParty = {
 /**
  * @type {CredentialCreationOptions}
  * https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/create
+ * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions
  */
 let defaultCreateOrReplaceCredOpts = {
   // signal: abortController.signal,
@@ -84,15 +86,50 @@ let defaultCreateOrReplaceCredOpts = {
   },
 };
 
+/**
+ * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
+ * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse
+ * @param {PublicKeyCredential} cred
+ */
+function pubkeyRegisterToJSON(cred) {
+  /** @type {AuthenticatorAttestationResponse} */
+  //@ts-ignore
+  let attResp = cred.response;
+
+  // Convert the credential response to plain JSON
+  let jsonCred = {
+    authenticatorAttachment: cred.authenticatorAttachment,
+    id: cred.id,
+    rawId: bufferToHex(cred.rawId),
+    response: {
+      attestationObject: bufferToHex(attResp.attestationObject),
+      clientDataJSON: bufferToHex(attResp.clientDataJSON),
+    },
+    type: cred.type,
+  };
+
+  return jsonCred;
+}
+
+// /**
+//  * @type {PasswordCredential}
+//  * https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/store
+//  * https://developer.mozilla.org/en-US/docs/Web/API/Credential
+//  * https://developer.mozilla.org/en-US/docs/Web/API/PasswordCredential
+//  *
+//  * Requires header 'Permissions-Policy: publickey-credentials-create=<allowlist>'
+//  * https://caniuse.com/mdn-api_publickeycredential
+//  */
 // let defaultStoreCredOpts = {
-//     // Requires header 'Permissions-Policy: publickey-credentials-create=<allowlist>'
-//     // https://caniuse.com/mdn-api_publickeycredential
-//     publicKey: {},
+//   id: emptyUserId,
+//   name: "",
+//   password: "",
 // };
 
 /**
  * @type {CredentialRequestOptions}
  * https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/get
+ * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions
  */
 let defaultGetCredOpts = {
   // "optional" // default
@@ -136,40 +173,31 @@ let defaultGetCredOpts = {
   },
 };
 
-// TODO https://github.com/DefinitelyTyped/DefinitelyTyped/blob/a98404407d08f8d85544b3f9b431a10ce3772b4a/types/webappsec-credential-management/index.d.ts#L437
-
 /**
- * The auth response object is opaque (i.e. no JSON.stringify() or Object.keys()),
- * and can only be used if you already know the keys.
- * @param {PublicKeyCredential} authResp
+ * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
+ * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAssertionResponse
+ * @param {PublicKeyCredential} cred
  */
-// https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse
-// https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAssertionResponse
-function logAuthResponse(authResp) {
-  console.log("type:", authResp.type);
-  console.log("id:", authResp.id); // rawId
+function pubkeyAuthToJSON(cred) {
+  /** @type {AuthenticatorAssertionResponse} */
+  //@ts-ignore
+  let assResp = cred.response;
 
-  // let pubBytes = authResp.response.getPublicKey();
-  // console.log("publicKey:", pubBytes);
-  // console.log("authenticatorAttachment:", authResp.authenticatorAttachment);
+  // Convert the credential response to plain JSON
+  let jsonCred = {
+    authenticatorAttachment: cred.authenticatorAttachment,
+    id: cred.id,
+    rawId: bufferToHex(cred.rawId),
+    response: {
+      authenticatorData: bufferToHex(assResp.authenticatorData),
+      clientDataJSON: bufferToHex(assResp.clientDataJSON),
+      signature: bufferToHex(assResp.signature),
+      userHandle: bufferToHex(assResp.userHandle),
+    },
+    type: cred.type,
+  };
 
-  // likely to be the same for the same data
-  let authtBytes = new Uint8Array(authResp.response.authenticatorData);
-  let authenticatorHex = bytesToHex(authtBytes);
-  console.log("authenticatorData:", authenticatorHex);
-
-  // info for the webserver, same for same challenge, origin, etc
-  let clientData = textDecoder.decode(authResp.response.clientDataJSON);
-  console.log("clientData:", clientData);
-
-  // likely to be the same as the userId, but it's device specific
-  let userHandle = textDecoder.decode(authResp.response.userHandle);
-  console.log("userHandle:", userHandle);
-
-  // likely to be different even for the same key and payload
-  let sigBytes = new Uint8Array(authResp.response.signature);
-  let sigHex = bytesToHex(sigBytes);
-  console.log("signature (salted):", sigHex);
+  return jsonCred;
 }
 
 Object.assign(window, {
@@ -179,25 +207,28 @@ Object.assign(window, {
   setAttachment,
 });
 
+/**
+ * @param {Event} event
+ */
 async function createOrReplacePublicKey(event) {
   event.preventDefault();
+  currentAbort = "changed webauthn to register";
 
-  let credOpts = globalThis.structuredClone(defaultCreateOrReplaceCredOpts);
+  let pubkeyRegOpts = globalThis.structuredClone(
+    defaultCreateOrReplaceCredOpts,
+  );
 
-  abortController.abort();
-  abortController = new AbortController();
-  credOpts.signal = abortController.signal;
   if (currentAttachment) {
     let attachment = currentAttachment;
     //@ts-ignore
-    credOpts.publicKey.authenticatorSelection.attachment = attachment;
+    pubkeyRegOpts.publicKey.authenticatorSelection.attachment = attachment;
   }
 
   void globalThis.crypto.getRandomValues(challenge);
-  if (!credOpts.publicKey) {
+  if (!pubkeyRegOpts.publicKey) {
     throw new Error(".publicKey must exist");
   }
-  credOpts.publicKey.challenge = challenge;
+  pubkeyRegOpts.publicKey.challenge = challenge;
 
   //@ts-ignore
   let username = $("input[name=username]").value;
@@ -218,36 +249,87 @@ async function createOrReplacePublicKey(event) {
     displayName: username.replace(/(\w)@.*/, "$1"),
   };
 
-  credOpts.publicKey.user = authUser;
+  pubkeyRegOpts.publicKey.user = authUser;
 
   // to prevent overwriting the ID / public key when creating
   // (or to not show the current user in a login-is prompt)
   // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
-  credOpts.publicKey.excludeCredentials = [];
+  pubkeyRegOpts.publicKey.excludeCredentials = [];
 
-  console.log("createOrReplacePublicKey() credOpts", credOpts);
-  const credential = await navigator.credentials
-    .create(credOpts)
+  console.log("createOrReplacePublicKey() pubkeyRegOpts", pubkeyRegOpts);
+
+  abortController.abort(currentAbort);
+  abortController = new AbortController();
+  pubkeyRegOpts.signal = abortController.signal;
+
+  const pubkeyRegResp = await navigator.credentials
+    .create(pubkeyRegOpts)
     .catch(function (err) {
       // this may never fire
-      console.log("Error: navigator.credentials.get():");
+      console.warn("Error: navigator.credentials.create():");
       console.log(err);
       return null;
     });
 
-  if (!credential) {
+  if (!pubkeyRegResp) {
+    console.warn("WebAuthn was changed, restarted, failed, or canceled");
+    if (currentMediation === "conditional") {
+      let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
+      authRequestOpts.mediation = currentMediation;
+      void (await authorizePasskey(authRequestOpts).catch(catchUiError));
+    }
+    return;
+  }
+  /** @type {PublicKeyCredential} */
+  //@ts-ignore
+  let pubkeyRegistration = pubkeyRegResp;
+
+  console.log(`createCredential response opaque:`);
+  console.log(pubkeyRegistration);
+  let registerResult = pubkeyRegisterToJSON(pubkeyRegistration);
+  console.log(`createCredential response JSON:`);
+  console.log(registerResult);
+}
+
+/**
+ * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
+ * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAssertionResponse
+ * @param {CredentialRequestOptions} authRequestOpts
+ * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions
+ */
+async function authorizePasskey(authRequestOpts) {
+  console.log("getPublicKey() authRequestOpts", authRequestOpts);
+
+  abortController.abort(currentAbort);
+  abortController = new AbortController();
+  authRequestOpts.signal = abortController.signal;
+
+  const pubkeyAuthResp = await navigator.credentials
+    .get(authRequestOpts)
+    .catch(function (err) {
+      // errors never fire when `authRequestOpts.mediation = "conditional";`
+      console.warn("Error: navigator.credentials.get():");
+      console.log(err);
+      return null;
+    });
+  if (!pubkeyAuthResp) {
     console.warn("WebAuthn was changed, restarted, failed, or canceled");
     return;
   }
   /** @type {PublicKeyCredential} */
   //@ts-ignore
-  let pubkeyCred = credential;
+  let pubkeyAuthentication = pubkeyAuthResp;
 
-  logAuthResponse(pubkeyCred);
-  console.log("WebAuthn successful", credential);
+  console.log("getPublicKey() pubkeyAuthReq", pubkeyAuthentication);
+  let authResult = pubkeyAuthToJSON(pubkeyAuthentication);
+  console.log(`getCredential response JSON:`);
+  console.log(authResult);
 }
 
-async function getPublicKey() {
+/**
+ * @param {Event} event
+ */
+async function getPublicKey(event) {
   if (currentMediation === "conditional") {
     let $mediation = $('select[name="mediation"]');
     //@ts-ignore
@@ -255,67 +337,54 @@ async function getPublicKey() {
     //@ts-ignore
     $mediation.onchange();
   }
+  currentAbort = "changed webauthn to auth";
 
-  let credOpts = globalThis.structuredClone(defaultGetCredOpts);
+  let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
 
-  abortController.abort();
-  abortController = new AbortController();
-  credOpts.signal = abortController.signal;
-
-  if (!credOpts.publicKey) {
+  if (!authRequestOpts.publicKey) {
     throw new Error(".publicKey must exist");
   }
-  credOpts.publicKey.challenge = challenge;
+
+  authRequestOpts.publicKey.challenge = challenge;
   void globalThis.crypto.getRandomValues(challenge);
 
-  credOpts.mediation = currentMediation;
+  authRequestOpts.mediation = currentMediation;
 
   // to prevent overwriting the ID / public key when creating
   // (or to not show the current user in a login-is prompt)
   // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
 
-  console.log("getPublicKey() credOpts", credOpts);
-  const credential = await navigator.credentials
-    .get(credOpts)
-    .catch(function (err) {
-      // this may never fire
-      console.log("Error: navigator.credentials.get():");
-      console.log(err);
-      return null;
-    });
-
-  if (!credential) {
-    console.warn("WebAuthn was changed, restarted, failed, or canceled");
-    return;
-  }
-
-  logAuthResponse(credential);
-  console.log("WebAuthn successful", credential);
+  await authorizePasskey(authRequestOpts).catch(catchUiError);
 }
 
-async function setAttachment() {
+/**
+ * @param {Event} event
+ */
+async function setAttachment(event) {
   //@ts-ignore
   let newAttachment = $('select[name="attachment"]').value || "";
   currentAttachment = newAttachment;
+  currentAbort = `changed webauthn attachment to ${currentAttachment}`;
 
   if (currentMediation === "conditional") {
-    abortController.abort();
-    abortController = new AbortController();
-    void enableWebAuthnAutocomplete();
+    let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
+    authRequestOpts.mediation = currentMediation;
+    void (await authorizePasskey(authRequestOpts).catch(catchUiError));
     return;
   }
 }
 
-async function setMediation() {
-  abortController.abort();
-  abortController = new AbortController();
-
+/**
+ * @param {Event} event
+ */
+async function setMediation(event) {
   //@ts-ignore
   let newMediation = $('select[name="mediation"]').value || "";
   if (!newMediation) {
     throw new Error("mediation option box must exist");
   }
   currentMediation = newMediation;
+  currentAbort = `changed webauthn mediation to ${currentMediation}`;
 
   if (newMediation === "conditional") {
     //@ts-ignore
@@ -323,7 +392,9 @@ async function setMediation() {
     //@ts-ignore
     $('[data-id="username"]').hidden = false;
 
-    void enableWebAuthnAutocomplete();
+    let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
+    authRequestOpts.mediation = currentMediation;
+    void (await authorizePasskey(authRequestOpts).catch(catchUiError));
     return;
   }
 
@@ -333,43 +404,34 @@ async function setMediation() {
   $('[data-id="username"]').hidden = true;
 }
 
-async function enableWebAuthnAutocomplete() {
-  let credOpts = globalThis.structuredClone(defaultGetCredOpts);
-
-  abortController.abort();
-  abortController = new AbortController();
-  credOpts.signal = abortController.signal;
-
-  if (currentMediation !== "conditional") {
-    let msg = `'mediation' must be 'conditional' for user autocomplete`;
-    window.alert(msg);
-    throw new Error(msg);
-  }
-  credOpts.mediation = currentMediation;
-
-  console.log("enableWebAuthnAutocomplete() credOpts", credOpts);
-  let credential = await navigator.credentials
-    .get(credOpts)
-    .catch(function (err) {
-      // this may never fire
-      console.log("Error: navigator.credentials.get():");
-      console.log(err);
-      return null;
-    });
-
-  if (!credential) {
-    console.warn("WebAuthn was changed, restarted, failed, or canceled");
-    return;
-  }
-
-  logAuthResponse(credential);
-  console.log("WebAuthn successful", credential);
+/**
+ * @param {Error} err
+ */
+async function catchUiError(err) {
+  console.warn(`Caught bubbled-up UI error:`);
+  console.error(err);
+  window.alert(err.message);
 }
 
+///**
+// * @param {Uint8Array|ArrayBuffer} buffer
+// */
+//function bufferToBase64(buffer) {
+//  let bytes = new Uint8Array(buffer);
+//  //@ts-ignore
+//  let binstr = String.fromCharCode.apply(null, bytes);
+//  return btoa(binstr);
+//}
+
 /**
- * @param {Uint8Array} bytes
+ * @param {Uint8Array|ArrayBuffer?} [buffer]
  */
-function bytesToHex(bytes) {
+function bufferToHex(buffer) {
+  if (!buffer) {
+    return "";
+  }
+
+  let bytes = new Uint8Array(buffer);
   /** @type {Array<String>} */
   let hex = [];
 
@@ -383,17 +445,35 @@ function bytesToHex(bytes) {
 }
 
 async function main() {
-  let userCanAutocomplete = false;
-  if (window.PublicKeyCredential?.isConditionalMediationAvailable) {
-    userCanAutocomplete =
+  let hasWebAuthn = false;
+  let hasWebAuthnAutocomplete = false;
+
+  if (
+    //@ts-ignore - tsc says these exist (i.e. in node), but we test because browsers don't always agree
+    globalThis.navigator?.credentials?.create &&
+    //@ts-ignore
+    globalThis.navigator?.credentials?.get &&
+    globalThis.PublicKeyCredential
+  ) {
+    hasWebAuthn = true;
+  }
+
+  //@ts-ignore
+  if (globalThis.PublicKeyCredential?.isConditionalMediationAvailable) {
+    hasWebAuthnAutocomplete =
       await window.PublicKeyCredential.isConditionalMediationAvailable();
+  }
+
+  console.log("WebAuthn Public Key Support?", hasWebAuthn);
+  console.log("WebAuthn Mediation Support?", hasWebAuthnAutocomplete);
+
+  if (hasWebAuthnAutocomplete) {
     let $mediation = $('select[name="mediation"]');
     //@ts-ignore
     $mediation.value = "conditional";
     //@ts-ignore
     $mediation.onchange();
   }
-  console.log("WebAuthn Medation Supported?", userCanAutocomplete);
 }
 
 main().catch(function (err) {
