@@ -25,9 +25,6 @@ PassKey.reg.COSE_ES256 = -7;
 PassKey.reg.COSE_RS256 = -257;
 
 PassKey.auth = {};
-/** @type {CredentialMediationRequirement} */
-PassKey.auth.mediation = "optional";
-
 PassKey.textEncoder = new TextEncoder();
 // let textDecoder = new TextDecoder();
 
@@ -102,7 +99,7 @@ PassKey.reg.defaultOpts = {
 
       userVerification: "discouraged", // implicit register // "preferred", "required"
     },
-    challenge: PassKey._challenge, // for attestation
+    challenge: new Uint8Array(0), // for attestation
     // don't create for
     excludeCredentials: [], // { id, transports, type }
     // https://caniuse.com/mdn-api_credentialscontainer_create_publickey_option_extensions
@@ -127,9 +124,13 @@ PassKey.reg.defaultOpts = {
 /**
  * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse
- * @param {PublicKeyCredential} cred
+ * @param {void|PublicKeyCredential?} cred
  */
 PassKey.reg.responseToJSON = function (cred) {
+  if (!cred) {
+    return null;
+  }
+
   /** @type {AuthenticatorAttestationResponse} */ //@ts-ignore
   let attResp = cred.response;
 
@@ -173,7 +174,7 @@ PassKey.auth.defaultOpts = {
   // "required" // does nothing
   // "conditional" // for autofill
   // "silent" // implicit (no interaction) // does nothing
-  mediation: PassKey.auth.mediation,
+  mediation: "optional",
 
   // signal: PassKey._abortCtrlr.signal,
 
@@ -198,7 +199,7 @@ PassKey.auth.defaultOpts = {
       //     type: "public-key",
       // },
     ],
-    challenge: PassKey._challenge, // for signature
+    challenge: new Uint8Array(0), // for signature
     // extensions: [],
     // hints: [],
     // can make Cross-Origin requests
@@ -213,9 +214,13 @@ PassKey.auth.defaultOpts = {
 /**
  * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAssertionResponse
- * @param {PublicKeyCredential} cred
+ * @param {void|PublicKeyCredential?} cred
  */
 PassKey.auth.responseToJSON = function (cred) {
+  if (!cred) {
+    return null;
+  }
+
   /** @type {AuthenticatorAssertionResponse} */ //@ts-ignore
   let assResp = cred.response;
 
@@ -247,19 +252,19 @@ PassKey.reg.set = async function (
   pubkeyRegOpts,
   abortMsg = "switch to explicit register",
 ) {
-  console.log("PassKey.reg.set() pubkeyRegOpts", pubkeyRegOpts);
-
   PassKey._abortCtrlr.abort(abortMsg);
   PassKey._abortCtrlr = new AbortController();
   pubkeyRegOpts.signal = PassKey._abortCtrlr.signal;
 
-  void globalThis.crypto.getRandomValues(PassKey._challenge);
   if (!pubkeyRegOpts.publicKey) {
     throw new Error(".publicKey must exist");
   }
-  pubkeyRegOpts.publicKey.challenge = PassKey._challenge;
+  if (!pubkeyRegOpts.publicKey.challenge.byteLength) {
+    void globalThis.crypto.getRandomValues(PassKey._challenge);
+    pubkeyRegOpts.publicKey.challenge = PassKey._challenge;
+  }
 
-  const pubkeyRegResp = await navigator.credentials
+  let pubkeyRegResp = await navigator.credentials
     .create(pubkeyRegOpts)
     .catch(function (err) {
       // this may never fire
@@ -267,27 +272,13 @@ PassKey.reg.set = async function (
       console.log(err);
       return null;
     });
-
   if (!pubkeyRegResp) {
-    console.warn("WebAuthn was changed, restarted, failed, or canceled");
-    if (PassKey.auth.mediation === "conditional") {
-      let abortMsg = "change from canceled registration to additional login";
-      let authRequestOpts = globalThis.structuredClone(
-        PassKey.auth.defaultOpts,
-      );
-      authRequestOpts.mediation = PassKey.auth.mediation;
-      void (await PassKey.auth.getOrWaitFor(authRequestOpts, abortMsg));
-    }
-    return;
+    return null;
   }
+
   /** @type {PublicKeyCredential} */ //@ts-ignore
   let pubkeyRegistration = pubkeyRegResp;
-
-  console.log(`createCredential response opaque:`);
-  console.log(pubkeyRegistration);
-  let registerResult = PassKey.reg.responseToJSON(pubkeyRegistration);
-  console.log(`createCredential response JSON:`);
-  console.log(registerResult);
+  return pubkeyRegistration;
 };
 
 /**
@@ -299,21 +290,22 @@ PassKey.reg.set = async function (
  */
 PassKey.auth.getOrWaitFor = async function (authRequestOpts, abortMsg) {
   if (!abortMsg) {
-    abortMsg = `switch to '${PassKey.auth.mediation}' key request`;
+    abortMsg = `switch to '${authRequestOpts.mediation}' key request`;
   }
-  console.log("getPublicKey() authRequestOpts", authRequestOpts);
 
-  void globalThis.crypto.getRandomValues(PassKey._challenge);
   if (!authRequestOpts.publicKey) {
     throw new Error(".publicKey must exist");
   }
-  authRequestOpts.publicKey.challenge = PassKey._challenge;
+  if (!authRequestOpts.publicKey.challenge.byteLength) {
+    void globalThis.crypto.getRandomValues(PassKey._challenge);
+    authRequestOpts.publicKey.challenge = PassKey._challenge;
+  }
 
   PassKey._abortCtrlr.abort(abortMsg);
   PassKey._abortCtrlr = new AbortController();
   authRequestOpts.signal = PassKey._abortCtrlr.signal;
 
-  const pubkeyAuthResp = await navigator.credentials
+  let pubkeyAuthResp = await navigator.credentials
     .get(authRequestOpts)
     .catch(function (err) {
       // errors never fire when `authRequestOpts.mediation = "conditional";`
@@ -322,21 +314,20 @@ PassKey.auth.getOrWaitFor = async function (authRequestOpts, abortMsg) {
       return null;
     });
   if (!pubkeyAuthResp) {
-    console.warn("WebAuthn was changed, restarted, failed, or canceled");
-    return;
+    return null;
   }
+
   /** @type {PublicKeyCredential} */ //@ts-ignore
   let pubkeyAuthentication = pubkeyAuthResp;
-
-  console.log("getPublicKey() pubkeyAuthReq", pubkeyAuthentication);
-  let authResult = PassKey.auth.responseToJSON(pubkeyAuthentication);
-  console.log(`getCredential response JSON:`);
-  console.log(authResult);
+  return pubkeyAuthentication;
 };
 
 let PassUI = {};
 PassUI.reg = {};
 PassUI.auth = {};
+
+/** @type {CredentialMediationRequirement} */
+PassUI.auth.mediation = "optional";
 
 /**
  * @param {Event} event
@@ -382,7 +373,7 @@ PassUI.reg.createOrReplaceKey = async function (event) {
   // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
   pubkeyRegOpts.publicKey.excludeCredentials = [];
 
-  if (PassKey.auth.mediation === "conditional") {
+  if (PassUI.auth.mediation === "conditional") {
     // by selecting explicit register we're canceling the
     // conditional state and should trigger the UI to update to match
     let $mediation = $('select[name="mediation"]');
@@ -391,20 +382,39 @@ PassUI.reg.createOrReplaceKey = async function (event) {
     //@ts-ignore
     $mediation.onchange();
   }
-  await PassKey.reg
+
+  console.log("PassKey.reg.set() pubkeyRegOpts", pubkeyRegOpts);
+  let regResult = await PassKey.reg
     .set(pubkeyRegOpts, abortMsg)
-    .then(function () {
+    .then(function (regResult) {
       //@ts-ignore
       $("input[name=username]").value = "";
+      return regResult;
     })
     .catch(PassUI._alertError);
+  if (regResult) {
+    await PassUI.reg.handleResult(regResult);
+    return;
+  }
+
+  if (PassUI.auth.mediation === "conditional") {
+    let abortMsg = "change from canceled registration to additional login";
+    let authRequestOpts = globalThis.structuredClone(PassKey.auth.defaultOpts);
+    authRequestOpts.mediation = PassUI.auth.mediation;
+    console.log("getPublicKey() authRequestOpts", authRequestOpts);
+    void (await PassKey.auth
+      .getOrWaitFor(authRequestOpts, abortMsg)
+      .then(PassUI.auth.handleResult));
+    return;
+  }
+  console.warn("WebAuthn was changed, restarted, failed, or canceled");
 };
 
 /**
  * @param {Event} event
  */
 PassUI.auth.requestKey = async function (event) {
-  if (PassKey.auth.mediation === "conditional") {
+  if (PassUI.auth.mediation === "conditional") {
     let $mediation = $('select[name="mediation"]');
     //@ts-ignore
     $mediation.value = "optional";
@@ -415,15 +425,17 @@ PassUI.auth.requestKey = async function (event) {
 
   let authRequestOpts = globalThis.structuredClone(PassKey.auth.defaultOpts);
 
-  authRequestOpts.mediation = PassKey.auth.mediation;
+  authRequestOpts.mediation = PassUI.auth.mediation;
 
   // to prevent overwriting the ID / public key when creating
   // (or to not show the current user in a login-is prompt)
   // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
 
-  await PassKey.auth
+  console.log("getPublicKey() authRequestOpts", authRequestOpts);
+  void (await PassKey.auth
     .getOrWaitFor(authRequestOpts, abortMsg)
-    .catch(PassUI._alertError);
+    .then(PassUI.auth.handleResult)
+    .catch(PassUI._alertError));
 };
 
 /**
@@ -435,11 +447,14 @@ PassUI.setAttachment = async function (event) {
   PassKey.attachment = newAttachment;
   let abortMsg = `changed webauthn attachment to ${PassKey.attachment}`;
 
-  if (PassKey.auth.mediation === "conditional") {
+  if (PassUI.auth.mediation === "conditional") {
     let authRequestOpts = globalThis.structuredClone(PassKey.auth.defaultOpts);
-    authRequestOpts.mediation = PassKey.auth.mediation;
+    authRequestOpts.mediation = PassUI.auth.mediation;
+
+    console.log("getPublicKey() authRequestOpts", authRequestOpts);
     void (await PassKey.auth
       .getOrWaitFor(authRequestOpts, abortMsg)
+      .then(PassUI.auth.handleResult)
       .catch(PassUI._alertError));
     return;
   }
@@ -454,8 +469,8 @@ PassUI.auth.setMediation = async function (event) {
   if (!newMediation) {
     throw new Error("mediation option box must exist");
   }
-  PassKey.auth.mediation = newMediation;
-  let abortMsg = `changed webauthn mediation to ${PassKey.auth.mediation}`;
+  PassUI.auth.mediation = newMediation;
+  let abortMsg = `changed webauthn mediation to ${PassUI.auth.mediation}`;
 
   if (newMediation === "conditional") {
     //@ts-ignore
@@ -464,9 +479,12 @@ PassUI.auth.setMediation = async function (event) {
     $('[data-id="username"]').hidden = false;
 
     let authRequestOpts = globalThis.structuredClone(PassKey.auth.defaultOpts);
-    authRequestOpts.mediation = PassKey.auth.mediation;
+    authRequestOpts.mediation = PassUI.auth.mediation;
+
+    console.log("getPublicKey() authRequestOpts", authRequestOpts);
     void (await PassKey.auth
       .getOrWaitFor(authRequestOpts, abortMsg)
+      .then(PassUI.auth.handleResult)
       .catch(PassUI._alertError));
     return;
   }
@@ -484,6 +502,40 @@ PassUI._alertError = async function (err) {
   console.warn(`Caught bubbled-up UI error:`);
   console.error(err);
   window.alert(err.message);
+};
+
+/**
+ * @param {void|PublicKeyCredential?} regResp
+ */
+PassUI.reg.handleResult = async function (regResp) {
+  if (!regResp) {
+    console.warn("WebAuthn was changed, restarted, failed, or canceled");
+    return null;
+  }
+
+  console.log(`PassUI.reg.handleResult (opaque):`);
+  console.log(regResp);
+
+  let regResult = PassKey.reg.responseToJSON(regResp);
+  console.log(`PassUI.reg.handleResult (JSON):`);
+  console.log(regResult);
+};
+
+/**
+ * @param {void|PublicKeyCredential?} authResp
+ */
+PassUI.auth.handleResult = async function (authResp) {
+  if (!authResp) {
+    console.warn("WebAuthn was changed, restarted, failed, or canceled");
+    return null;
+  }
+
+  console.log(`PassUI.auth.handleResult (opaque):`);
+  console.log(authResp);
+
+  let authResult = PassKey.auth.responseToJSON(authResp);
+  console.log(`PassUI.auth.handleResult (JSON):`);
+  console.log(authResult);
 };
 
 Object.assign(window, { PassUI });
