@@ -92,12 +92,12 @@
           </p>
         </header>
 
-        <form id="login-form" onsubmit="createOrReplacePublicKey(event)">
+        <form id="login-form" onsubmit="PassUI.reg.createOrReplaceKey(event)">
           <h2>Select Account</h2>
           <label
             >Mediation Type:
             <small>(Keypass Prompt Style)</small>
-            <select name="mediation" onchange="setMediation(event)">
+            <select name="mediation" onchange="PassUI.auth.setMediation(event)">
               <option value="conditional" selected>
                 conditional (Autocomplete Keypass)
               </option>
@@ -109,7 +109,7 @@
           <label
             >Attachment Type:
             <small>Computer (or Phone), or Key (or Tag)</small>
-            <select name="attachment" onchange="setAttachment(event)">
+            <select name="attachment" onchange="PassUI.setAttachment(event)">
               <option value="" selected>(allow all)</option>
               <option value="platform">platform (computer, phone)</option>
               <option value="cross-platform">cross-platform (key, tag)</option>
@@ -128,7 +128,7 @@
           <button
             data-id="authenticate"
             type="button"
-            onclick="getPublicKey(event)"
+            onclick="PassUI.auth.requestKey(event)"
           >
             Sign In with Passkey
           </button>

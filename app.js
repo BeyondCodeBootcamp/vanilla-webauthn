@@ -10,24 +10,62 @@ function $(cssSelector, $parent = document) {
   return $child;
 }
 
-let textEncoder = new TextEncoder();
+/**
+ * PassKey is a namespace for relations of WebAuthn PublicKey
+ * singleton because it relies on navigator state, of which there is only one
+ */
+let PassKey = {};
+PassKey.attachment = "";
+
+PassKey.reg = {};
+// https://www.iana.org/assignments/cose/cose.xhtml#algorithms
+PassKey.reg.COSE_ES256 = -7;
+//PassKey.reg.COSE_EDDSA = -8;
+//PassKey.reg.COSE_PS256 = -37;
+PassKey.reg.COSE_RS256 = -257;
+
+PassKey.auth = {};
+/** @type {CredentialMediationRequirement} */
+PassKey.auth.mediation = "optional";
+
+PassKey.textEncoder = new TextEncoder();
 // let textDecoder = new TextDecoder();
 
-// https://www.iana.org/assignments/cose/cose.xhtml#algorithms
-const COSE_ES256 = -7;
-//const COSE_EDDSA = -8;
-//const COSE_PS256 = -37;
-const COSE_RS256 = -257;
+///**
+// * @param {Uint8Array|ArrayBuffer} buffer
+// */
+//PassKey._bufferToBase64 = function (buffer) {
+//  let bytes = new Uint8Array(buffer);
+//  //@ts-ignore
+//  let binstr = String.fromCharCode.apply(null, bytes);
+//  return btoa(binstr);
+//}
 
-let challenge = new Uint8Array(32);
-let emptyUserId = new Uint8Array(0);
-/** @type {CredentialMediationRequirement} */
-let currentMediation = "optional";
-let currentAttachment = "";
-let currentAbort = "";
-let abortController = new AbortController();
+/**
+ * @param {Uint8Array|ArrayBuffer?} [buffer]
+ */
+PassKey._bufferToHex = function (buffer) {
+  if (!buffer) {
+    return "";
+  }
 
-let relyingParty = {
+  let bytes = new Uint8Array(buffer);
+  /** @type {Array<String>} */
+  let hex = [];
+
+  for (let b of bytes) {
+    let h = b.toString(16);
+    h = h.padStart(2, "0");
+    hex.push(h);
+  }
+
+  return hex.join("");
+};
+
+PassKey._abortCtrlr = new AbortController();
+PassKey._challenge = new Uint8Array(32);
+PassKey._emptyUserId = new Uint8Array(0);
+PassKey.relyingParty = {
   // https://github.com/w3c/webauthn/wiki/Explainer:-Related-origin-requests
   id: location.host, // varies pubkey, may be set to parent but not child
   name: $("title")?.textContent || "",
@@ -38,8 +76,8 @@ let relyingParty = {
  * https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/create
  * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions
  */
-let defaultCreateOrReplaceCredOpts = {
-  // signal: abortController.signal,
+PassKey.reg.defaultOpts = {
+  // signal: PassKey._abortCtrlr.signal,
 
   // Pick ONE of password, identity, federated, publicKey
 
@@ -64,24 +102,24 @@ let defaultCreateOrReplaceCredOpts = {
 
       userVerification: "discouraged", // implicit register // "preferred", "required"
     },
-    challenge: challenge, // for attestation
+    challenge: PassKey._challenge, // for attestation
     // don't create for
     excludeCredentials: [], // { id, transports, type }
     // https://caniuse.com/mdn-api_credentialscontainer_create_publickey_option_extensions
     pubKeyCredParams: [
       {
         type: "public-key",
-        alg: COSE_ES256,
+        alg: PassKey.reg.COSE_ES256,
       },
       {
         type: "public-key",
-        alg: COSE_RS256,
+        alg: PassKey.reg.COSE_RS256,
       },
     ],
     // extensions: [],
-    rp: relyingParty,
+    rp: PassKey.relyingParty,
     timeout: 180 * 1000,
-    user: { id: emptyUserId, name: "", displayName: "" },
+    user: { id: PassKey._emptyUserId, name: "", displayName: "" },
     // hints: [], // "security-key" (key), "client-device" (phone), "hybrid" (more)
   },
 };
@@ -91,7 +129,7 @@ let defaultCreateOrReplaceCredOpts = {
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse
  * @param {PublicKeyCredential} cred
  */
-function pubkeyRegisterToJSON(cred) {
+PassKey.reg.responseToJSON = function (cred) {
   /** @type {AuthenticatorAttestationResponse} */ //@ts-ignore
   let attResp = cred.response;
 
@@ -99,16 +137,16 @@ function pubkeyRegisterToJSON(cred) {
   let jsonCred = {
     authenticatorAttachment: cred.authenticatorAttachment,
     id: cred.id,
-    rawId: bufferToHex(cred.rawId),
+    rawId: PassKey._bufferToHex(cred.rawId),
     response: {
-      attestationObject: bufferToHex(attResp.attestationObject),
-      clientDataJSON: bufferToHex(attResp.clientDataJSON),
+      attestationObject: PassKey._bufferToHex(attResp.attestationObject),
+      clientDataJSON: PassKey._bufferToHex(attResp.clientDataJSON),
     },
     type: cred.type,
   };
 
   return jsonCred;
-}
+};
 
 // /**
 //  * @type {PasswordCredential}
@@ -130,14 +168,14 @@ function pubkeyRegisterToJSON(cred) {
  * https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/get
  * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions
  */
-let defaultGetCredOpts = {
+PassKey.auth.defaultOpts = {
   // "optional" // default
   // "required" // does nothing
   // "conditional" // for autofill
   // "silent" // implicit (no interaction) // does nothing
-  mediation: currentMediation,
+  mediation: PassKey.auth.mediation,
 
-  // signal: abortController.signal,
+  // signal: PassKey._abortCtrlr.signal,
 
   // Pick ONE of password, identity, federated, publicKey
 
@@ -160,13 +198,13 @@ let defaultGetCredOpts = {
       //     type: "public-key",
       // },
     ],
-    challenge: challenge, // for signature
+    challenge: PassKey._challenge, // for signature
     // extensions: [],
     // hints: [],
     // can make Cross-Origin requests
     //   Cross-Origin-Opener-Policy: same-origin
     //   Cross-Origin-Embedder-Policy: require-corp
-    rpId: relyingParty.id,
+    rpId: PassKey.relyingParty.id,
     timeout: 180 * 1000,
     userVerification: "preferred", // "required" (explicit), "discouraged" (implicit)
   },
@@ -177,7 +215,7 @@ let defaultGetCredOpts = {
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAssertionResponse
  * @param {PublicKeyCredential} cred
  */
-function pubkeyAuthToJSON(cred) {
+PassKey.auth.responseToJSON = function (cred) {
   /** @type {AuthenticatorAssertionResponse} */ //@ts-ignore
   let assResp = cred.response;
 
@@ -185,44 +223,41 @@ function pubkeyAuthToJSON(cred) {
   let jsonCred = {
     authenticatorAttachment: cred.authenticatorAttachment,
     id: cred.id,
-    rawId: bufferToHex(cred.rawId),
+    rawId: PassKey._bufferToHex(cred.rawId),
     response: {
-      authenticatorData: bufferToHex(assResp.authenticatorData),
-      clientDataJSON: bufferToHex(assResp.clientDataJSON),
-      signature: bufferToHex(assResp.signature),
-      userHandle: bufferToHex(assResp.userHandle),
+      authenticatorData: PassKey._bufferToHex(assResp.authenticatorData),
+      clientDataJSON: PassKey._bufferToHex(assResp.clientDataJSON),
+      signature: PassKey._bufferToHex(assResp.signature),
+      userHandle: PassKey._bufferToHex(assResp.userHandle),
     },
     type: cred.type,
   };
 
   return jsonCred;
-}
-
-Object.assign(window, {
-  createOrReplacePublicKey,
-  getPublicKey,
-  setMediation,
-  setAttachment,
-});
+};
 
 /**
  * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
- * @param {CredentialCreationOptions} pubkeyRegOpts
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse
  * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions
+ * @param {CredentialCreationOptions} pubkeyRegOpts
+ * @param {String} [abortMsg] - any existing webauthn attempt (including autocomplete) will be canceled with this message
  */
-async function setPasskey(pubkeyRegOpts) {
-  console.log("createOrReplacePublicKey() pubkeyRegOpts", pubkeyRegOpts);
+PassKey.reg.set = async function (
+  pubkeyRegOpts,
+  abortMsg = "switch to explicit register",
+) {
+  console.log("PassKey.reg.set() pubkeyRegOpts", pubkeyRegOpts);
 
-  abortController.abort(currentAbort);
-  abortController = new AbortController();
-  pubkeyRegOpts.signal = abortController.signal;
+  PassKey._abortCtrlr.abort(abortMsg);
+  PassKey._abortCtrlr = new AbortController();
+  pubkeyRegOpts.signal = PassKey._abortCtrlr.signal;
 
-  void globalThis.crypto.getRandomValues(challenge);
+  void globalThis.crypto.getRandomValues(PassKey._challenge);
   if (!pubkeyRegOpts.publicKey) {
     throw new Error(".publicKey must exist");
   }
-  pubkeyRegOpts.publicKey.challenge = challenge;
+  pubkeyRegOpts.publicKey.challenge = PassKey._challenge;
 
   const pubkeyRegResp = await navigator.credentials
     .create(pubkeyRegOpts)
@@ -235,10 +270,13 @@ async function setPasskey(pubkeyRegOpts) {
 
   if (!pubkeyRegResp) {
     console.warn("WebAuthn was changed, restarted, failed, or canceled");
-    if (currentMediation === "conditional") {
-      let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
-      authRequestOpts.mediation = currentMediation;
-      void (await authorizePasskey(authRequestOpts));
+    if (PassKey.auth.mediation === "conditional") {
+      let abortMsg = "change from canceled registration to additional login";
+      let authRequestOpts = globalThis.structuredClone(
+        PassKey.auth.defaultOpts,
+      );
+      authRequestOpts.mediation = PassKey.auth.mediation;
+      void (await PassKey.auth.getOrWaitFor(authRequestOpts, abortMsg));
     }
     return;
   }
@@ -247,92 +285,33 @@ async function setPasskey(pubkeyRegOpts) {
 
   console.log(`createCredential response opaque:`);
   console.log(pubkeyRegistration);
-  let registerResult = pubkeyRegisterToJSON(pubkeyRegistration);
+  let registerResult = PassKey.reg.responseToJSON(pubkeyRegistration);
   console.log(`createCredential response JSON:`);
   console.log(registerResult);
-}
-
-/**
- * @param {Event} event
- */
-async function createOrReplacePublicKey(event) {
-  event.preventDefault();
-  currentAbort = "changed webauthn to register";
-
-  let pubkeyRegOpts = globalThis.structuredClone(
-    defaultCreateOrReplaceCredOpts,
-  );
-  if (!pubkeyRegOpts.publicKey) {
-    throw new Error(".publicKey must exist");
-  }
-
-  if (currentAttachment) {
-    let attachment = currentAttachment;
-    //@ts-ignore
-    pubkeyRegOpts.publicKey.authenticatorSelection.attachment = attachment;
-  }
-
-  //@ts-ignore
-  let username = $("input[name=username]").value;
-  if (!username) {
-    window.alert("missing username");
-    return;
-  }
-
-  let lowername = username.toLowerCase();
-  let userId = textEncoder.encode(lowername);
-  if (userId.length > 64) {
-    window.alert("username must be less than 64 characters long");
-    return;
-  }
-  let authUser = {
-    id: userId, // up to 64 bytes userHandle varies pubkey
-    name: lowername, // email, phone, username
-    displayName: username.replace(/(\w)@.*/, "$1"),
-  };
-
-  pubkeyRegOpts.publicKey.user = authUser;
-
-  // to prevent overwriting the ID / public key when creating
-  // (or to not show the current user in a login-is prompt)
-  // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
-  pubkeyRegOpts.publicKey.excludeCredentials = [];
-
-  if (currentMediation === "conditional") {
-    // by selecting explicit register we're canceling the
-    // conditional state and should trigger the UI to update to match
-    let $mediation = $('select[name="mediation"]');
-    //@ts-ignore
-    $mediation.value = "optional";
-    //@ts-ignore
-    $mediation.onchange();
-  }
-  await setPasskey(pubkeyRegOpts)
-    .then(function () {
-      //@ts-ignore
-      $("input[name=username]").value = "";
-    })
-    .catch(catchUiError);
-}
+};
 
 /**
  * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAssertionResponse
- * @param {CredentialRequestOptions} authRequestOpts
  * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialRequestOptions
+ * @param {CredentialRequestOptions} authRequestOpts
+ * @param {String} [abortMsg] - any existing webauthn attempt (including autocomplete) will be canceled with this message
  */
-async function authorizePasskey(authRequestOpts) {
+PassKey.auth.getOrWaitFor = async function (authRequestOpts, abortMsg) {
+  if (!abortMsg) {
+    abortMsg = `switch to '${PassKey.auth.mediation}' key request`;
+  }
   console.log("getPublicKey() authRequestOpts", authRequestOpts);
 
-  void globalThis.crypto.getRandomValues(challenge);
+  void globalThis.crypto.getRandomValues(PassKey._challenge);
   if (!authRequestOpts.publicKey) {
     throw new Error(".publicKey must exist");
   }
-  authRequestOpts.publicKey.challenge = challenge;
+  authRequestOpts.publicKey.challenge = PassKey._challenge;
 
-  abortController.abort(currentAbort);
-  abortController = new AbortController();
-  authRequestOpts.signal = abortController.signal;
+  PassKey._abortCtrlr.abort(abortMsg);
+  PassKey._abortCtrlr = new AbortController();
+  authRequestOpts.signal = PassKey._abortCtrlr.signal;
 
   const pubkeyAuthResp = await navigator.credentials
     .get(authRequestOpts)
@@ -350,63 +329,133 @@ async function authorizePasskey(authRequestOpts) {
   let pubkeyAuthentication = pubkeyAuthResp;
 
   console.log("getPublicKey() pubkeyAuthReq", pubkeyAuthentication);
-  let authResult = pubkeyAuthToJSON(pubkeyAuthentication);
+  let authResult = PassKey.auth.responseToJSON(pubkeyAuthentication);
   console.log(`getCredential response JSON:`);
   console.log(authResult);
-}
+};
+
+let PassUI = {};
+PassUI.reg = {};
+PassUI.auth = {};
 
 /**
  * @param {Event} event
  */
-async function getPublicKey(event) {
-  if (currentMediation === "conditional") {
+PassUI.reg.createOrReplaceKey = async function (event) {
+  event.preventDefault();
+  let abortMsg = "changed webauthn to register";
+
+  let pubkeyRegOpts = globalThis.structuredClone(PassKey.reg.defaultOpts);
+  if (!pubkeyRegOpts.publicKey) {
+    throw new Error(".publicKey must exist");
+  }
+
+  if (PassKey.attachment) {
+    let attachment = PassKey.attachment;
+    //@ts-ignore
+    pubkeyRegOpts.publicKey.authenticatorSelection.attachment = attachment;
+  }
+
+  //@ts-ignore
+  let username = $("input[name=username]").value;
+  if (!username) {
+    window.alert("missing username");
+    return;
+  }
+
+  let lowername = username.toLowerCase();
+  let userId = PassKey.textEncoder.encode(lowername);
+  if (userId.length > 64) {
+    window.alert("username must be less than 64 characters long");
+    return;
+  }
+  let authUser = {
+    id: userId, // up to 64 bytes userHandle varies pubkey
+    name: lowername, // email, phone, username
+    displayName: username.replace(/(\w)@.*/, "$1"),
+  };
+
+  pubkeyRegOpts.publicKey.user = authUser;
+
+  // to prevent overwriting the ID / public key when creating
+  // (or to not show the current user in a login-is prompt)
+  // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
+  pubkeyRegOpts.publicKey.excludeCredentials = [];
+
+  if (PassKey.auth.mediation === "conditional") {
+    // by selecting explicit register we're canceling the
+    // conditional state and should trigger the UI to update to match
     let $mediation = $('select[name="mediation"]');
     //@ts-ignore
     $mediation.value = "optional";
     //@ts-ignore
     $mediation.onchange();
   }
-  currentAbort = "changed webauthn to auth";
+  await PassKey.reg
+    .set(pubkeyRegOpts, abortMsg)
+    .then(function () {
+      //@ts-ignore
+      $("input[name=username]").value = "";
+    })
+    .catch(PassUI._alertError);
+};
 
-  let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
+/**
+ * @param {Event} event
+ */
+PassUI.auth.requestKey = async function (event) {
+  if (PassKey.auth.mediation === "conditional") {
+    let $mediation = $('select[name="mediation"]');
+    //@ts-ignore
+    $mediation.value = "optional";
+    //@ts-ignore
+    $mediation.onchange();
+  }
+  let abortMsg = "changed webauthn to auth";
 
-  authRequestOpts.mediation = currentMediation;
+  let authRequestOpts = globalThis.structuredClone(PassKey.auth.defaultOpts);
+
+  authRequestOpts.mediation = PassKey.auth.mediation;
 
   // to prevent overwriting the ID / public key when creating
   // (or to not show the current user in a login-is prompt)
   // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
 
-  await authorizePasskey(authRequestOpts).catch(catchUiError);
-}
+  await PassKey.auth
+    .getOrWaitFor(authRequestOpts, abortMsg)
+    .catch(PassUI._alertError);
+};
 
 /**
  * @param {Event} event
  */
-async function setAttachment(event) {
+PassUI.setAttachment = async function (event) {
   //@ts-ignore
   let newAttachment = $('select[name="attachment"]').value || "";
-  currentAttachment = newAttachment;
-  currentAbort = `changed webauthn attachment to ${currentAttachment}`;
+  PassKey.attachment = newAttachment;
+  let abortMsg = `changed webauthn attachment to ${PassKey.attachment}`;
 
-  if (currentMediation === "conditional") {
-    let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
-    authRequestOpts.mediation = currentMediation;
-    void (await authorizePasskey(authRequestOpts).catch(catchUiError));
+  if (PassKey.auth.mediation === "conditional") {
+    let authRequestOpts = globalThis.structuredClone(PassKey.auth.defaultOpts);
+    authRequestOpts.mediation = PassKey.auth.mediation;
+    void (await PassKey.auth
+      .getOrWaitFor(authRequestOpts, abortMsg)
+      .catch(PassUI._alertError));
     return;
   }
-}
+};
 
 /**
  * @param {Event} event
  */
-async function setMediation(event) {
+PassUI.auth.setMediation = async function (event) {
   //@ts-ignore
   let newMediation = $('select[name="mediation"]').value || "";
   if (!newMediation) {
     throw new Error("mediation option box must exist");
   }
-  currentMediation = newMediation;
-  currentAbort = `changed webauthn mediation to ${currentMediation}`;
+  PassKey.auth.mediation = newMediation;
+  let abortMsg = `changed webauthn mediation to ${PassKey.auth.mediation}`;
 
   if (newMediation === "conditional") {
     //@ts-ignore
@@ -414,9 +463,11 @@ async function setMediation(event) {
     //@ts-ignore
     $('[data-id="username"]').hidden = false;
 
-    let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
-    authRequestOpts.mediation = currentMediation;
-    void (await authorizePasskey(authRequestOpts).catch(catchUiError));
+    let authRequestOpts = globalThis.structuredClone(PassKey.auth.defaultOpts);
+    authRequestOpts.mediation = PassKey.auth.mediation;
+    void (await PassKey.auth
+      .getOrWaitFor(authRequestOpts, abortMsg)
+      .catch(PassUI._alertError));
     return;
   }
 
@@ -424,47 +475,18 @@ async function setMediation(event) {
   $('[data-id="register"]').hidden = true;
   //@ts-ignore
   $('[data-id="username"]').hidden = true;
-}
+};
 
 /**
  * @param {Error} err
  */
-async function catchUiError(err) {
+PassUI._alertError = async function (err) {
   console.warn(`Caught bubbled-up UI error:`);
   console.error(err);
   window.alert(err.message);
-}
+};
 
-///**
-// * @param {Uint8Array|ArrayBuffer} buffer
-// */
-//function bufferToBase64(buffer) {
-//  let bytes = new Uint8Array(buffer);
-//  //@ts-ignore
-//  let binstr = String.fromCharCode.apply(null, bytes);
-//  return btoa(binstr);
-//}
-
-/**
- * @param {Uint8Array|ArrayBuffer?} [buffer]
- */
-function bufferToHex(buffer) {
-  if (!buffer) {
-    return "";
-  }
-
-  let bytes = new Uint8Array(buffer);
-  /** @type {Array<String>} */
-  let hex = [];
-
-  for (let b of bytes) {
-    let h = b.toString(16);
-    h = h.padStart(2, "0");
-    hex.push(h);
-  }
-
-  return hex.join("");
-}
+Object.assign(window, { PassUI });
 
 async function main() {
   let hasWebAuthn = false;
