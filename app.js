@@ -298,7 +298,7 @@ async function setAttachment() {
   let newAttachment = $('select[name="attachment"]').value || "";
   currentAttachment = newAttachment;
 
-  if (newAttachment === "conditional") {
+  if (currentMediation === "conditional") {
     abortController.abort();
     abortController = new AbortController();
     void enableWebAuthnAutocomplete();
