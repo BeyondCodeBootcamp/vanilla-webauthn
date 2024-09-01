@@ -64,7 +64,7 @@ let defaultCreateOrReplaceCredOpts = {
 
       userVerification: "discouraged", // implicit register // "preferred", "required"
     },
-    challenge: challenge,
+    challenge: challenge, // for attestation
     // don't create for
     excludeCredentials: [], // { id, transports, type }
     // https://caniuse.com/mdn-api_credentialscontainer_create_publickey_option_extensions
@@ -160,7 +160,7 @@ let defaultGetCredOpts = {
       //     type: "public-key",
       // },
     ],
-    challenge: challenge,
+    challenge: challenge, // for signature
     // extensions: [],
     // hints: [],
     // can make Cross-Origin requests
@@ -206,6 +206,53 @@ Object.assign(window, {
 });
 
 /**
+ * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
+ * @param {CredentialCreationOptions} pubkeyRegOpts
+ * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse
+ * https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions
+ */
+async function setPasskey(pubkeyRegOpts) {
+  console.log("createOrReplacePublicKey() pubkeyRegOpts", pubkeyRegOpts);
+
+  abortController.abort(currentAbort);
+  abortController = new AbortController();
+  pubkeyRegOpts.signal = abortController.signal;
+
+  void globalThis.crypto.getRandomValues(challenge);
+  if (!pubkeyRegOpts.publicKey) {
+    throw new Error(".publicKey must exist");
+  }
+  pubkeyRegOpts.publicKey.challenge = challenge;
+
+  const pubkeyRegResp = await navigator.credentials
+    .create(pubkeyRegOpts)
+    .catch(function (err) {
+      // this may never fire
+      console.warn("Error: navigator.credentials.create():");
+      console.log(err);
+      return null;
+    });
+
+  if (!pubkeyRegResp) {
+    console.warn("WebAuthn was changed, restarted, failed, or canceled");
+    if (currentMediation === "conditional") {
+      let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
+      authRequestOpts.mediation = currentMediation;
+      void (await authorizePasskey(authRequestOpts));
+    }
+    return;
+  }
+  /** @type {PublicKeyCredential} */ //@ts-ignore
+  let pubkeyRegistration = pubkeyRegResp;
+
+  console.log(`createCredential response opaque:`);
+  console.log(pubkeyRegistration);
+  let registerResult = pubkeyRegisterToJSON(pubkeyRegistration);
+  console.log(`createCredential response JSON:`);
+  console.log(registerResult);
+}
+
+/**
  * @param {Event} event
  */
 async function createOrReplacePublicKey(event) {
@@ -215,18 +262,15 @@ async function createOrReplacePublicKey(event) {
   let pubkeyRegOpts = globalThis.structuredClone(
     defaultCreateOrReplaceCredOpts,
   );
+  if (!pubkeyRegOpts.publicKey) {
+    throw new Error(".publicKey must exist");
+  }
 
   if (currentAttachment) {
     let attachment = currentAttachment;
     //@ts-ignore
     pubkeyRegOpts.publicKey.authenticatorSelection.attachment = attachment;
   }
-
-  void globalThis.crypto.getRandomValues(challenge);
-  if (!pubkeyRegOpts.publicKey) {
-    throw new Error(".publicKey must exist");
-  }
-  pubkeyRegOpts.publicKey.challenge = challenge;
 
   //@ts-ignore
   let username = $("input[name=username]").value;
@@ -254,38 +298,7 @@ async function createOrReplacePublicKey(event) {
   // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
   pubkeyRegOpts.publicKey.excludeCredentials = [];
 
-  console.log("createOrReplacePublicKey() pubkeyRegOpts", pubkeyRegOpts);
-
-  abortController.abort(currentAbort);
-  abortController = new AbortController();
-  pubkeyRegOpts.signal = abortController.signal;
-
-  const pubkeyRegResp = await navigator.credentials
-    .create(pubkeyRegOpts)
-    .catch(function (err) {
-      // this may never fire
-      console.warn("Error: navigator.credentials.create():");
-      console.log(err);
-      return null;
-    });
-
-  if (!pubkeyRegResp) {
-    console.warn("WebAuthn was changed, restarted, failed, or canceled");
-    if (currentMediation === "conditional") {
-      let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
-      authRequestOpts.mediation = currentMediation;
-      void (await authorizePasskey(authRequestOpts).catch(catchUiError));
-    }
-    return;
-  }
-  /** @type {PublicKeyCredential} */ //@ts-ignore
-  let pubkeyRegistration = pubkeyRegResp;
-
-  console.log(`createCredential response opaque:`);
-  console.log(pubkeyRegistration);
-  let registerResult = pubkeyRegisterToJSON(pubkeyRegistration);
-  console.log(`createCredential response JSON:`);
-  console.log(registerResult);
+  await setPasskey(pubkeyRegOpts).catch(catchUiError);
 }
 
 /**
@@ -296,6 +309,12 @@ async function createOrReplacePublicKey(event) {
  */
 async function authorizePasskey(authRequestOpts) {
   console.log("getPublicKey() authRequestOpts", authRequestOpts);
+
+  void globalThis.crypto.getRandomValues(challenge);
+  if (!authRequestOpts.publicKey) {
+    throw new Error(".publicKey must exist");
+  }
+  authRequestOpts.publicKey.challenge = challenge;
 
   abortController.abort(currentAbort);
   abortController = new AbortController();
@@ -336,13 +355,6 @@ async function getPublicKey(event) {
   currentAbort = "changed webauthn to auth";
 
   let authRequestOpts = globalThis.structuredClone(defaultGetCredOpts);
-
-  if (!authRequestOpts.publicKey) {
-    throw new Error(".publicKey must exist");
-  }
-
-  authRequestOpts.publicKey.challenge = challenge;
-  void globalThis.crypto.getRandomValues(challenge);
 
   authRequestOpts.mediation = currentMediation;
 
