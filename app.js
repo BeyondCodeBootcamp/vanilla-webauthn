@@ -92,8 +92,7 @@ let defaultCreateOrReplaceCredOpts = {
  * @param {PublicKeyCredential} cred
  */
 function pubkeyRegisterToJSON(cred) {
-  /** @type {AuthenticatorAttestationResponse} */
-  //@ts-ignore
+  /** @type {AuthenticatorAttestationResponse} */ //@ts-ignore
   let attResp = cred.response;
 
   // Convert the credential response to plain JSON
@@ -179,8 +178,7 @@ let defaultGetCredOpts = {
  * @param {PublicKeyCredential} cred
  */
 function pubkeyAuthToJSON(cred) {
-  /** @type {AuthenticatorAssertionResponse} */
-  //@ts-ignore
+  /** @type {AuthenticatorAssertionResponse} */ //@ts-ignore
   let assResp = cred.response;
 
   // Convert the credential response to plain JSON
@@ -280,8 +278,7 @@ async function createOrReplacePublicKey(event) {
     }
     return;
   }
-  /** @type {PublicKeyCredential} */
-  //@ts-ignore
+  /** @type {PublicKeyCredential} */ //@ts-ignore
   let pubkeyRegistration = pubkeyRegResp;
 
   console.log(`createCredential response opaque:`);
@@ -316,8 +313,7 @@ async function authorizePasskey(authRequestOpts) {
     console.warn("WebAuthn was changed, restarted, failed, or canceled");
     return;
   }
-  /** @type {PublicKeyCredential} */
-  //@ts-ignore
+  /** @type {PublicKeyCredential} */ //@ts-ignore
   let pubkeyAuthentication = pubkeyAuthResp;
 
   console.log("getPublicKey() pubkeyAuthReq", pubkeyAuthentication);
