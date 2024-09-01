@@ -298,7 +298,21 @@ async function createOrReplacePublicKey(event) {
   // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
   pubkeyRegOpts.publicKey.excludeCredentials = [];
 
-  await setPasskey(pubkeyRegOpts).catch(catchUiError);
+  if (currentMediation === "conditional") {
+    // by selecting explicit register we're canceling the
+    // conditional state and should trigger the UI to update to match
+    let $mediation = $('select[name="mediation"]');
+    //@ts-ignore
+    $mediation.value = "optional";
+    //@ts-ignore
+    $mediation.onchange();
+  }
+  await setPasskey(pubkeyRegOpts)
+    .then(function () {
+      //@ts-ignore
+      $("input[name=username]").value = "";
+    })
+    .catch(catchUiError);
 }
 
 /**
