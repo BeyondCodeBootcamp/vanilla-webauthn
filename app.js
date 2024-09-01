@@ -18,11 +18,16 @@ let PassKey = {};
 PassKey.attachment = "";
 
 PassKey.reg = {};
+PassKey.reg.coseAlgos = {};
 // https://www.iana.org/assignments/cose/cose.xhtml#algorithms
 PassKey.reg.COSE_ES256 = -7;
+PassKey.reg.coseAlgos["-7"] = "ES256";
 //PassKey.reg.COSE_EDDSA = -8;
+// PassKey.reg.coseAlgos["-8"] = "EDDSA";
 //PassKey.reg.COSE_PS256 = -37;
+// PassKey.reg.coseAlgos["-37"] = "PS256";
 PassKey.reg.COSE_RS256 = -257;
+PassKey.reg.coseAlgos["-257"] = "RS256";
 
 PassKey.auth = {};
 PassKey.textEncoder = new TextEncoder();
@@ -133,6 +138,19 @@ PassKey.reg.responseToJSON = function (cred) {
 
   /** @type {AuthenticatorAttestationResponse} */ //@ts-ignore
   let attResp = cred.response;
+  let authenticatorData = attResp.getAuthenticatorData();
+  let asn1Pubkey = attResp.getPublicKey();
+  let coseKeyType = attResp.getPublicKeyAlgorithm();
+  let keyType = "";
+  if (coseKeyType === -7) {
+    keyType = "ES256";
+  } else if (-257) {
+    keyType = "RS256";
+  } else {
+    throw new Error(
+      `COSE algorithm #${coseKeyType} is not known to be widely supported`,
+    );
+  }
 
   // Convert the credential response to plain JSON
   let jsonCred = {
@@ -141,7 +159,13 @@ PassKey.reg.responseToJSON = function (cred) {
     rawId: PassKey._bufferToHex(cred.rawId),
     response: {
       attestationObject: PassKey._bufferToHex(attResp.attestationObject),
+      // https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data
+      // a subset of attestationObject
+      authenticatorData: PassKey._bufferToHex(authenticatorData),
       clientDataJSON: PassKey._bufferToHex(attResp.clientDataJSON),
+      publicKey: PassKey._bufferToHex(asn1Pubkey),
+      publicKeyAlgorithm: keyType,
+      transports: attResp.getTransports(),
     },
     type: cred.type,
   };
