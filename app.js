@@ -296,9 +296,6 @@ async function getPublicKey() {
 async function setAttachment() {
   //@ts-ignore
   let newAttachment = $('select[name="attachment"]').value || "";
-  if (!newAttachment) {
-    throw new Error("attachment option box must exist");
-  }
   currentAttachment = newAttachment;
 
   if (newAttachment === "conditional") {
