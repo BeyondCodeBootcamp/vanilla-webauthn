@@ -316,6 +316,9 @@ PassKey.auth.getOrWaitFor = async function (authRequestOpts, abortMsg) {
   if (!abortMsg) {
     abortMsg = `switch to '${authRequestOpts.mediation}' key request`;
   }
+  PassKey._abortCtrlr.abort(abortMsg);
+  PassKey._abortCtrlr = new AbortController();
+  authRequestOpts.signal = PassKey._abortCtrlr.signal;
 
   if (!authRequestOpts.publicKey) {
     throw new Error(".publicKey must exist");
@@ -324,10 +327,6 @@ PassKey.auth.getOrWaitFor = async function (authRequestOpts, abortMsg) {
     void globalThis.crypto.getRandomValues(PassKey._challenge);
     authRequestOpts.publicKey.challenge = PassKey._challenge;
   }
-
-  PassKey._abortCtrlr.abort(abortMsg);
-  PassKey._abortCtrlr = new AbortController();
-  authRequestOpts.signal = PassKey._abortCtrlr.signal;
 
   let pubkeyAuthResp = await navigator.credentials
     .get(authRequestOpts)
