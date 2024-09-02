@@ -51,7 +51,7 @@ console.log(regRequest);
           { type: "public-key", alg: PassKey.reg.COSE_ES256 },
           { type: "public-key", alg: PassKey.reg.COSE_RS256 },
         ],
-        rp: { id: window.location.host, name: "" },
+        rp: { id: window.location.hostname, name: "" },
         timeout: 180 * 1000,
         user: { id: PassKey._emptyUserId, name: "", displayName: "" },
       },
@@ -216,11 +216,11 @@ PassKey.attachment = ""; //
 
 /**
  * 'name' is ONLY for REGISTRATION and should be the name of your Website / App / Product
- * 'id' must be window.location.host or a parent domain (up to the PSL apex)
+ * 'id' must be window.location.hostname or a parent domain (up to the PSL apex)
  * Examples: 'bar.foo.example.com' or 'foo.example.com' or 'example.com',
- *           but not 'baz.example.com' or 'com' (assuming the first is location.host)
+ *           but not 'baz.example.com' or 'com' (assuming the first is location.hostname)
  */
-PassKey.relyingParty = { id: window.location.host, name: "what you want" };
+PassKey.relyingParty = { id: window.location.hostname, name: "what you want" };
 
 /** For converting user.id to bytes from user.name */
 PassKey.textEncoder = new TextEncoder();

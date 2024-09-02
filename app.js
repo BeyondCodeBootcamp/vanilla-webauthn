@@ -69,7 +69,7 @@ PassKey._challenge = new Uint8Array(32);
 PassKey._emptyUserId = new Uint8Array(0);
 PassKey.relyingParty = {
   // https://github.com/w3c/webauthn/wiki/Explainer:-Related-origin-requests
-  id: location.host, // varies pubkey, may be set to parent but not child
+  id: location.hostname, // varies pubkey, may be set to parent but not child
   name: $("title")?.textContent || "",
 };
 
