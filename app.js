@@ -36,7 +36,7 @@ PassKey.textEncoder = new TextEncoder();
 /**
  * @param {Uint8Array|ArrayBuffer?} buffer
  */
-PassKey._bufferToBase64 = function (buffer) {
+PassKey.bufferToBase64 = function (buffer) {
   if (!buffer?.byteLength) {
     return null;
   }
@@ -165,18 +165,18 @@ PassKey.reg.responseToJSON = function (cred) {
   let jsonCred = {
     authenticatorAttachment: cred.authenticatorAttachment,
     id: cred.id,
-    rawId: PassKey._bufferToBase64(cred.rawId), // same as cred.id
+    rawId: PassKey.bufferToBase64(cred.rawId), // same as cred.id
     rawIdHex: PassKey._bufferToHex(cred.rawId), // same as cred.id
     response: {
-      attestationObject: PassKey._bufferToBase64(attResp.attestationObject),
+      attestationObject: PassKey.bufferToBase64(attResp.attestationObject),
       attestationObjectHex: PassKey._bufferToHex(attResp.attestationObject),
       // https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API/Authenticator_data
       // a subset of attestationObject
-      authenticatorData: PassKey._bufferToBase64(authenticatorData),
+      authenticatorData: PassKey.bufferToBase64(authenticatorData),
       authenticatorDataHex: PassKey._bufferToHex(authenticatorData),
-      clientDataJSON: PassKey._bufferToBase64(attResp.clientDataJSON),
+      clientDataJSON: PassKey.bufferToBase64(attResp.clientDataJSON),
       clientDataJSONHex: PassKey._bufferToHex(attResp.clientDataJSON),
-      publicKey: PassKey._bufferToBase64(asn1Pubkey),
+      publicKey: PassKey.bufferToBase64(asn1Pubkey),
       publicKeyHex: PassKey._bufferToHex(asn1Pubkey),
       publicKeyAlgorithm: coseKeyType,
       publicKeyAlgorithmName: keyTypeName,
@@ -270,14 +270,14 @@ PassKey.auth.responseToJSON = function (cred) {
   let jsonCred = {
     authenticatorAttachment: cred.authenticatorAttachment,
     id: cred.id,
-    rawId: PassKey._bufferToBase64(cred.rawId), // same as cred.id
+    rawId: PassKey.bufferToBase64(cred.rawId), // same as cred.id
     rawIdHex: PassKey._bufferToHex(cred.rawId), // same as cred.id
     response: {
-      authenticatorData: PassKey._bufferToBase64(assResp.authenticatorData),
+      authenticatorData: PassKey.bufferToBase64(assResp.authenticatorData),
       authenticatorDataHex: PassKey._bufferToHex(assResp.authenticatorData),
-      clientDataJSON: PassKey._bufferToBase64(assResp.clientDataJSON),
+      clientDataJSON: PassKey.bufferToBase64(assResp.clientDataJSON),
       clientDataJSONHex: PassKey._bufferToHex(assResp.clientDataJSON),
-      signature: PassKey._bufferToBase64(assResp.signature),
+      signature: PassKey.bufferToBase64(assResp.signature),
       signatureHex: PassKey._bufferToHex(assResp.signature),
       getClientSecretUserHandleHex: function () {
         // this is a client-side secret and should NOT be disclosed to the server

@@ -224,6 +224,12 @@ PassKey.relyingParty = { id: window.location.hostname, name: "what you want" };
 
 /** For converting user.id to bytes from user.name */
 PassKey.textEncoder = new TextEncoder();
+
+/**
+ * For convenience in performing the the spec'd .toJSON() that the browser doesn't provide
+ * @param {Uint8Array|ArrayBuffer} buffer
+ */
+PassKey.bufferToBase64(uint8ArrayOrArrayBuffer);
 ```
 
 ## PassUI
