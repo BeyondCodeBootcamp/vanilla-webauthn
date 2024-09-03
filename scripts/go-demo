@@ -1,0 +1,21 @@
+#!/bin/sh
+set -e
+set -u
+
+g_default_creation="fixtures/yubikey-01-credential-creation-response.json"
+g_default_request="fixtures/yubikey-02-credential-request-response.json"
+g_here="$(pwd)"
+
+main() { (
+    cd ./go-webauthn-verify-demo/ || return 1
+
+    if test "${1}" = "--debug"; then
+        shift
+        go run . --debug "${g_here}/${1:-$g_default_creation}" "${g_here}/${2:-$g_default_request}"
+    else
+        go run . "${g_here}/${1:-$g_default_creation}" "${g_here}/${2:-$g_default_request}"
+    fi
+
+); }
+
+main "$@"
