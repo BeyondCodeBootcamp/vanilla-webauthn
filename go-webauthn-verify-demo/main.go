@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
@@ -45,45 +48,117 @@ func (w *WebAuthn) verifyAuthAttemptByRegisteredCredential(
 }
 
 // These are for testing only
-type CredentialRequest struct {
+type CredentialCreationResponse struct {
 	ID       string
 	Response struct {
-		ClientDataJSON string `json:"clientDataJSON"`
+		PublicKey      string           `json:"publicKey"`
+		PublicKeyECDSA *ecdsa.PublicKey `json:"-"`
 	} `json:"response"`
 }
-type ClientData struct {
-	Challenge string `json:"challenge"`
+type CredentialRequestResponse struct {
+	ID       string
+	Response struct {
+		ClientDataJSON  string `json:"clientDataJSON"`
+		ClientDataBytes []byte `json:"-"`
+		ClientData      struct {
+			Challenge string `json:"challenge"`
+		} `json:"-"`
+		AuthenticatorData  string `json:"authenticatorData"`
+		AuthenticatorBytes []byte `json:"-"`
+		Signature          string `json:"signature"`
+		SignatureBytes     []byte `json:"-"`
+		VerifiableBytes    []byte `json:"-"`
+	} `json:"response"`
 }
 
-// this should fetch the challenge from the database, not the object
-func getMatchingChallenge(credentialRequestResponse []byte) (string, error) {
-	// use the data to lookup the challenge
-	credReq := &CredentialRequest{}
+func decodeCredentialCretionResponse(credentialCreationResponse []byte) (*CredentialCreationResponse, error) {
+	credCreation := &CredentialCreationResponse{}
+	if err := json.Unmarshal(credentialCreationResponse, credCreation); err != nil {
+		return nil, err
+	}
+
+	publicKeyDER, err := base64.RawURLEncoding.DecodeString(
+		credCreation.Response.PublicKey,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	credCreation.Response.PublicKeyECDSA, err = parseECDSAPublicKey(publicKeyDER)
+	if err != nil {
+		return nil, err
+	}
+
+	return credCreation, nil
+}
+
+func parseECDSAPublicKey(derBytes []byte) (*ecdsa.PublicKey, error) {
+	publicKey, err := x509.ParsePKIXPublicKey(derBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse DER encoded public key: %w", err)
+	}
+
+	// Type assert to *ecdsa.PublicKey
+	ecdsaPublicKey, ok := publicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("not an ECDSA public key")
+	}
+
+	return ecdsaPublicKey, nil
+}
+
+func decodeCredentialRequestResponse(credentialRequestResponse []byte) (*CredentialRequestResponse, error) {
+	credReq := &CredentialRequestResponse{}
 	if err := json.Unmarshal(credentialRequestResponse, credReq); err != nil {
-		return "", err
+		return nil, err
 	}
 	fmt.Println()
 	fmt.Println("Credential ID:", credReq.ID)
 
-	clientDataJSON, err := base64.RawURLEncoding.DecodeString(
+	clientDataBytes, err := base64.RawURLEncoding.DecodeString(
 		credReq.Response.ClientDataJSON,
 	)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+
+	credReq.Response.ClientDataBytes = clientDataBytes
 	fmt.Println(
 		"Client Data JSON:",
-		string(clientDataJSON),
+		string(clientDataBytes),
 	)
 	fmt.Println()
 
-	clientData := &ClientData{}
-	if err := json.Unmarshal(clientDataJSON, clientData); err != nil {
-		return "", err
+	if err := json.Unmarshal(clientDataBytes, &credReq.Response.ClientData); err != nil {
+		return nil, err
 	}
 
+	authenticatorBytes, err := base64.RawURLEncoding.DecodeString(credReq.Response.AuthenticatorData)
+	if err != nil {
+		return nil, err
+	}
+	credReq.Response.AuthenticatorBytes = authenticatorBytes
+
+	signatureBytes, err := base64.RawURLEncoding.DecodeString(credReq.Response.Signature)
+	if err != nil {
+		return nil, err
+	}
+	credReq.Response.SignatureBytes = signatureBytes
+
+	clientDataHash := sha256.Sum256(credReq.Response.ClientDataBytes)
+	verifiableData := append(credReq.Response.AuthenticatorBytes, clientDataHash[:]...)
+	// each algo specifies the SHA-xxx hash in its name
+	// exception: SHA512 used for EDDSA
+	verifiableHash := sha256.Sum256(verifiableData)
+
+	credReq.Response.VerifiableBytes = verifiableHash[:]
+
+	return credReq, nil
+}
+
+func getPreviouslyStoredChallenge(credReqResp *CredentialRequestResponse) (string, error) {
 	// for the demo we just use the requests own challenge
-	return clientData.Challenge, nil
+	return credReqResp.Response.ClientData.Challenge, nil
 }
 
 func main() {
@@ -131,8 +206,30 @@ func main() {
 		log.Fatalf("Failed to parse credential creation response: %v", err)
 	}
 
+	credCreation, err := decodeCredentialCretionResponse(credentialCreationResponse)
+	if err != nil {
+		log.Fatalf("Could not decode credentialCreation: %v", err)
+	}
+
+	credReq, err := decodeCredentialRequestResponse(credentialRequestResponse)
+	if err != nil {
+		log.Fatalf("Could not decode credentialRequest: %v", err)
+	}
+
+	verified := ecdsa.VerifyASN1(
+		credCreation.Response.PublicKeyECDSA,
+		credReq.Response.VerifiableBytes,
+		credReq.Response.SignatureBytes,
+	)
+	if !verified {
+		log.Fatalf("Could not verify signature bytes")
+	}
+
+	fmt.Println("Verified:", verified)
+	fmt.Println("")
+
 	// typically the challenge would be looked up from storage for verification
-	storedChallenge, err := getMatchingChallenge(credentialRequestResponse)
+	storedChallenge, err := getPreviouslyStoredChallenge(credReq)
 	if err != nil {
 		log.Fatalf("Could not find challenging matching the request: %v", err)
 	}
