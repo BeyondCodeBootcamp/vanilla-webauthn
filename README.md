@@ -70,7 +70,7 @@ regRequest.publicKey.user = {
 regRequest.publicKey.excludeCredentials = [{ id: "<base64-id>" }];
 
 // 'signal' is managed between webauthn operations and 'challenge' is created if none is provided
-let regResp = await PassKey.reg.set(regRequest);
+let regResp = await PassKey.reg.createOrReplace(regRequest);
 let regResult = PassKey.reg.responseToJSON(regResp);
 console.log(regResult);
 /*
@@ -129,7 +129,7 @@ authRequest.mediation = "conditional";
 authRequest.allowedCredentials = [{ id: "<base64-id>" }];
 
 // 'challenge' is set on each call if not provided
-let authResp = await PassKey.auth.getOrWaitFor(authRequest);
+let authResp = await PassKey.auth.request(authRequest);
 let authResult = PassKey.auth.responseToJSON(authResp);
 console.log(authResult);
 /*
@@ -166,7 +166,7 @@ PassKey.reg.defaultOpts = {
  *   - excluding the given Credential IDs (as excludedCredentials[].id)
  * @param {CredentialCreationOptions} pubkeyRegOpts
  */
-PassKey.reg.set(pubkeyRegOpts, abortMsg);
+PassKey.reg.createOrReplace(pubkeyRegOpts, abortMsg);
 
 /**
  * Makes a plain copy of the opaque object, which can be serialized and POSTed
@@ -198,7 +198,13 @@ PassKey.auth.defaultOpts = {
  * Requests a Passkey with the given characteristics
  * @param {CredentialRequestOptions} authRequestOpts
  */
-PassKey.auth.getOrWaitFor(authRequestOpts);
+PassKey.auth.request(authRequestOpts);
+
+/**
+ * Forces 'conditional' and handles abort signal
+ * @param {CredentialRequestOptions} authRequestOpts
+ */
+PassKey.auth.requestAutocomplete(authRequestOpts);
 
 /**
  * Makes a plain copy of the opaque object, which can be serialized and POSTed
