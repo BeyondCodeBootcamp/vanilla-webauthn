@@ -183,6 +183,21 @@ PassKey.reg.keyTypes["-257"] = "RS256";
 
 ```js
 /**
+ * Checks for WebAuthn support and sets some variables
+ * @param {String} name - a friendly title for the site or app
+ * @param {Base64} challenge - from the server
+ */
+await PassKey.init({ name, challenge });
+
+/**
+ * Indicates which features are supported
+ * @type {Object.<String, Boolean>}
+ */
+PassKey.support = { webauthn, platform, conditional, ctap2 };
+```
+
+```js
+/**
  * "conditional" will WAIT to prompt until the user selects from autocomplete or
  *               the reuest is abort()d (which PassKey does) before requesting another mode
  * "optional" will IMMEDIATELY open a passkey selection prompt
