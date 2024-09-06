@@ -19,7 +19,7 @@ implemented more straightforward and approachable.
 
 - Example
   - Register Passkey
-  - Authenticate with Passkey
+  - Use Passkey to Authenticate
 - API (PassKey)
 - PassUI (Example UI)
 
@@ -53,21 +53,23 @@ console.log(regRequest);
         ],
         rp: { id: window.location.hostname, name: "" },
         timeout: 180 * 1000,
-        user: { id: PassKey._emptyUserId, name: "", displayName: "" },
+        user: { id: new Uint8Array(0), name: "", displayName: "" },
       },
     }
 */
 
 // these are required and have no reasonable defaults
 regRequest.publicKey.rp.name = "Example App";
-regRequest.publicKey.user = {
-  id: PassKey.textEncoder.encoder("jon@example.com"),
-  name: "jon@example.com",
-  displayName: "Jon",
-};
+regRequest.publicKey.user.name = "jon@example.com";
+regRequest.publicKey.user.displayName = "Jon";
 
-// exclude all CREDENTIAL IDs (not user ids) to prevent them from being deleted and replaced
-regRequest.publicKey.excludeCredentials = [{ id: "<base64-id>" }];
+// Note: `regRequest.publicKey.user.id` can hold 64 bytes of aribtrary data,
+// but will be made random by PassKey.reg.createOrReplace() if not non-zero
+
+// exclude all USER IDs to prevent them from being deleted and replaced
+regRequest.publicKey.excludeCredentials = [
+  { id: authResp.response.userHandle },
+];
 
 // 'signal' is managed between webauthn operations and 'challenge' is created if none is provided
 let regResp = await PassKey.reg.createOrReplace(regRequest);
@@ -97,12 +99,14 @@ significance yet. However, from a UX perspective it can be more reassuring to
 the user to feel like they did something "secure" to create their account, which
 is what most OSes require.</small>
 
-### Register Passkey
+### Use Passkey to Authenticate
 
 "Authenticate" is a "Get" operation.
 
-It gives back a signature, userHandle, and some data about the authenticator
+It gives back a `signature`, `userHandle`, and some data about the authenticator
 device.
+
+Note: `userHandle` is not returned on `silent` requests.
 
 ### Authenticate with Passkey
 
@@ -141,7 +145,7 @@ console.log(authResult);
         "authenticatorData": "<subset of attestation data>",
         "clientDataJSON": "<preserved byte order for signature verification>",
         "signature": "<asn1-der-signature>",
-        "userHandle": "<hex-encoded bytes of given user.id>"
+        getClientSecretUserHandleHex() // "<hex-encoded bytes of given user.id>"
       },
       "type": "public-key"
     }
