@@ -237,13 +237,9 @@ PassKey.reg.defaultOpts = {
 /**
  * Converts a WebAuthn Public Key Credential response to plain JSON with base64 encoding for byte array fields.
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAttestationResponse
- * @param {void|PublicKeyCredential?} cred
+ * @param {PublicKeyCredential} cred
  */
 PassKey.reg.responseToJSON = function (cred) {
-  if (!cred) {
-    return null;
-  }
-
   /** @type {AuthenticatorAttestationResponse} */ //@ts-ignore
   let attResp = cred.response;
   let authenticatorData = attResp.getAuthenticatorData();
@@ -354,13 +350,9 @@ PassKey.auth.defaultOpts = {
  * Note: 'userHandle' is a client-side secret, or at least it  allows up to 64-bytes,
  * some of which may be used for a local encryption key.
  * https://developer.mozilla.org/en-US/docs/Web/API/AuthenticatorAssertionResponse
- * @param {void|PublicKeyCredential?} cred
+ * @param {PublicKeyCredential} cred
  */
 PassKey.auth.responseToJSON = function (cred) {
-  if (!cred) {
-    return null;
-  }
-
   /** @type {AuthenticatorAssertionResponse} */ //@ts-ignore
   let assResp = cred.response;
   let userHandleHex = PassKey._bufferToHex(assResp.userHandle);
@@ -380,6 +372,7 @@ PassKey.auth.responseToJSON = function (cred) {
       signatureHex: PassKey._bufferToHex(assResp.signature),
       getClientSecretUserHandleHex: function () {
         // this is a client-side secret and should NOT be disclosed to the server
+        // (up to 64 bytes of arbitrary data, some of which may be made public)
         return userHandleHex;
       },
     },
@@ -412,6 +405,14 @@ PassKey.reg.createOrReplace = async function (
 
   if (!pubkeyRegOpts.publicKey) {
     throw new Error(".publicKey must exist");
+  }
+  if (!pubkeyRegOpts.publicKey.user.id.byteLength) {
+    pubkeyRegOpts.publicKey.user.id = new Uint8Array(32);
+    //@ts-ignore - trust me bro, it's a Uint8Array ^^
+    globalThis.crypto.getRandomValues(pubkeyRegOpts.publicKey.user.id);
+  }
+  if (pubkeyRegOpts.publicKey.user.id.byteLength > 64) {
+    throw new Error("publicKey.user.id must be less than 64 bytes");
   }
 
   console.log(`rp.id:`, pubkeyRegOpts.publicKey.rp.id);
@@ -548,24 +549,14 @@ PassUI.reg.createOrReplaceKey = async function (event) {
     window.alert("missing username");
     return;
   }
-
   let lowername = username.toLowerCase();
-  let clientSecretUserHandle = PassKey.textEncoder.encode(lowername);
-  if (clientSecretUserHandle.length > 64) {
-    window.alert("username must be less than 64 characters long");
-    return;
-  }
-  let authUser = {
-    id: clientSecretUserHandle, // up to 64 bytes userHandle varies pubkey, which prevents overwriting the key
-    name: lowername, // email, phone, username
-    displayName: username.replace(/(\w)@.*/, "$1"),
-  };
 
-  pubkeyRegOpts.publicKey.user = authUser;
+  pubkeyRegOpts.publicKey.user.name = lowername;
+  pubkeyRegOpts.publicKey.user.displayName = username.replace(/(\w)@.*/, "$1");
 
   // to prevent overwriting the ID / public key when creating
   // (or to not show the current user in a login-is prompt)
-  // excludeCredentials: [ { type: 'public-key', id: 'base64id' }]
+  // excludeCredentials: [ { type: 'public-key', id: ArrayBuffer }]
   pubkeyRegOpts.publicKey.excludeCredentials = [];
 
   if (PassUI.auth.mediation === "conditional") {
