@@ -33,16 +33,20 @@ PassKey.textEncoder = new TextEncoder();
 
 /**
  * @param {Uint8Array|ArrayBuffer?} buffer
+ * @param {Boolean} rfc
  */
-PassKey.bufferToBase64 = function (buffer) {
+PassKey.bufferToBase64 = function (buffer, rfc) {
   if (!buffer?.byteLength) {
-    return null;
+    return "";
   }
 
   let bytes = new Uint8Array(buffer);
   //@ts-ignore
   let binstr = String.fromCharCode.apply(null, bytes);
   let rfcBase64 = btoa(binstr);
+  if (rfc) {
+    return rfcBase64;
+  }
 
   let urlBase64 = rfcBase64.replace(/=+$/g, "");
   urlBase64 = urlBase64.replace(/[/]/g, "_");
@@ -199,7 +203,7 @@ PassKey.reg.defaultOpts = {
   // https://caniuse.com/mdn-api_publickeycredential
   // https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredentialCreationOptions
   publicKey: {
-    attestation: "none",
+    attestation: "direct", // "none"
     // attestationFormats: [],
     authenticatorSelection: {
       // leave undefined to allow either OS/Browser (platform) or Key (BLE, FIDO)
@@ -370,6 +374,9 @@ PassKey.auth.responseToJSON = function (cred) {
       clientDataJSONHex: PassKey._bufferToHex(assResp.clientDataJSON),
       signature: PassKey.bufferToBase64(assResp.signature),
       signatureHex: PassKey._bufferToHex(assResp.signature),
+      getClientSecretUserHandle: function () {
+        return assResp.userHandle;
+      },
       getClientSecretUserHandleHex: function () {
         // this is a client-side secret and should NOT be disclosed to the server
         // (up to 64 bytes of arbitrary data, some of which may be made public)
@@ -558,6 +565,25 @@ PassUI.reg.createOrReplaceKey = async function (event) {
   // (or to not show the current user in a login-is prompt)
   // excludeCredentials: [ { type: 'public-key', id: ArrayBuffer }]
   pubkeyRegOpts.publicKey.excludeCredentials = [];
+  let idsMap = await PassUI.storage.get(`webauthn:ids`);
+  let ids = Object.keys(idsMap);
+  for (let id of ids) {
+    let idBytes = PassKey.base64ToBytes(id);
+    pubkeyRegOpts.publicKey.excludeCredentials.push({
+      type: "public-key",
+      id: idBytes,
+    });
+
+    let data = sessionStorage.getItem(`webauthn:cred-${id}-data`);
+    if (!data) {
+      continue;
+    }
+    let dataBytes = PassKey.base64ToBytes(data);
+    pubkeyRegOpts.publicKey.excludeCredentials.push({
+      type: "public-key",
+      id: dataBytes,
+    });
+  }
 
   if (PassUI.auth.mediation === "conditional") {
     // by selecting explicit register we're canceling the
@@ -572,7 +598,7 @@ PassUI.reg.createOrReplaceKey = async function (event) {
   console.log("PassUI.reg.createOrReplaceKey() pubkeyRegOpts", pubkeyRegOpts);
   void (await PassKey.reg
     .createOrReplace(pubkeyRegOpts, abortMsg)
-    .then(PassUI.reg.handleBuffers)
+    .then(PassUI.reg.handleBuffersFor(pubkeyRegOpts))
     .catch(function (err) {
       console.warn(
         "PassUI.auth.requestKey() was canceled or failed:",
@@ -608,7 +634,7 @@ PassUI.auth.requestKey = async function (event) {
   console.log("PassUI.auth.requestKey() authRequestOpts", authRequestOpts);
   void (await PassKey.auth
     .request(authRequestOpts, "switch to explicit request")
-    .then(PassUI.auth.handleBuffers)
+    .then(PassUI.auth.handleBuffersFor(authRequestOpts))
     .catch(function (err) {
       console.warn(
         "PassUI.auth.requestKey() was canceled or failed:",
@@ -647,7 +673,7 @@ PassUI.auth._keepAutocompleteAlive = async function () {
   void (await PassKey.auth
     .requestAutocomplete(autocompleteOpts, "restarting autocomplete")
     //@ts-ignore
-    .then(PassUI.auth.handleBuffers)
+    .then(PassUI.auth.handleBuffersFor(autocompleteOpts))
     .catch(PassKey.ignoreIfCanceled)
     .then(function () {
       void PassUI.auth.keepAutocompleteAlive();
@@ -717,40 +743,257 @@ PassUI._alertError = async function (err) {
 };
 
 /**
- * @param {void|PublicKeyCredential?} regResp
+ * @param {CredentialCreationOptions} pubkeyRegOpts
  */
-PassUI.reg.handleBuffers = async function (regResp) {
-  console.log(`PassUI.reg.handleBuffers (opaque):`);
-  console.log(regResp);
+PassUI.reg.handleBuffersFor = function (pubkeyRegOpts) {
+  /**
+   * @param {void|PublicKeyCredential?} regResp
+   */
+  return async function (regResp) {
+    console.log(`PassUI.reg.handleBuffers (opaque):`);
+    console.log(regResp);
+    if (!regResp) {
+      throw new Error(
+        "[Developer Error] expected credential registration but got nothing",
+      );
+    }
 
-  let regResult = PassKey.reg.responseToJSON(regResp);
-  console.log(`PassUI.auth.handleObject (JSON):`);
-  console.log(regResult);
-  let regResultJSON = JSON.stringify(regResult, null, 2);
-  console.log(regResultJSON);
-  window.alert(
-    `[default PassUI.auth.handleObject]\nCreate or Replace Passkey was Successful:\n\n${regResultJSON}`,
-  );
+    let regResult = PassKey.reg.responseToJSON(regResp);
+    //@ts-ignore - publicKey exists
+    Object.assign(regResult, { _name: pubkeyRegOpts.publicKey.user.name });
+    console.log(`PassUI.auth.handleObject (JSON):`);
+    console.log(regResult);
 
-  //@ts-ignore
-  $("input[name=username]").value = "";
+    let regResultJSON = JSON.stringify(regResult, null, 2);
+    console.log(regResultJSON);
+    window.alert(
+      `[default PassUI.auth.handleObject]\nCreate or Replace Passkey was Successful:\n\n${regResultJSON}`,
+    );
+
+    localStorage.setItem(`webauthn:cred-${regResult.id}-reg`, regResultJSON);
+    {
+      // @ts-ignore - publicKey exists
+      let data = pubkeyRegOpts.publicKey.user.id || null;
+      // @ts-ignore - trust me bro, it's a buffer
+      let dataHex = PassKey._bufferToHex(data);
+      sessionStorage.setItem(`webauthn:cred-${regResult.id}-data`, dataHex);
+      let idsMap = await PassUI.storage.get(`webauthn:ids`);
+      idsMap[regResult.id] = true;
+      PassUI.storage.set(`webauthn:ids`, idsMap);
+    }
+
+    //@ts-ignore
+    $("input[name=username]").value = "";
+  };
 };
 
 /**
- * @param {PublicKeyCredential} authResp
+ * @param {CredentialRequestOptions} authRequestOpts
  */
-PassUI.auth.handleBuffers = async function (authResp) {
-  console.log(`PassUI.auth.handleBuffers (opaque):`);
-  console.log(authResp);
+PassUI.auth.handleBuffersFor = function (authRequestOpts) {
+  /**
+   * @param {PublicKeyCredential} authResp
+   */
+  return async function (authResp) {
+    console.log(`PassUI.auth.handleBuffers (opaque):`);
+    console.log(authResp);
+    if (!authResp) {
+      throw new Error(
+        "[Developer Error] expected credential response but got nothing",
+      );
+    }
 
-  let authResult = PassKey.auth.responseToJSON(authResp);
-  console.log(`PassUI.auth.handleObject (JSON):`);
-  console.log(authResult);
-  let authResultJSON = JSON.stringify(authResult, null, 2);
-  console.log(authResultJSON);
-  window.alert(
-    `[default PassUI.auth.handleObject]\nAuth via Saved Passkey was Successful:\n\n${authResultJSON}`,
-  );
+    let authResult = PassKey.auth.responseToJSON(authResp);
+    console.log(`PassUI.auth.handleObject (JSON):`);
+    console.log(authResult);
+    let authResultJSON = JSON.stringify(authResult, null, 2);
+    console.log(authResultJSON);
+    window.alert(
+      `[default PassUI.auth.handleObject]\nAuth via Saved Passkey was Successful:\n\n${authResultJSON}`,
+    );
+
+    localStorage.setItem(`webauthn:cred-${authResult.id}-auth`, authResultJSON);
+
+    {
+      let dataBytes = authResult.response.getClientSecretUserHandle();
+      let data = PassKey.bufferToBase64(dataBytes);
+      sessionStorage.setItem(`webauthn:cred-${authResult.id}-data`, data);
+      let idsMap = await PassUI.storage.get(`webauthn:ids`);
+      idsMap[authResult.id] = true;
+      PassUI.storage.set(`webauthn:ids`, idsMap);
+    }
+  };
+};
+
+PassUI.storage = {};
+PassUI.storage.all = async function () {
+  /** @type {Array<any>} */
+  let results = [];
+  let vacuum = [];
+
+  for (let i = 0; i < localStorage.length; i += 1) {
+    let key = localStorage.getKey(i);
+    let isWebAuthn = key.startsWith("webauthn:");
+    if (!isWebAuthn) {
+      continue;
+    }
+
+    let dataJSON = localStorage.getItem(key);
+    if (!dataJSON) {
+      vacuum.push(key);
+      continue;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(dataJSON);
+    } catch (e) {
+      continue;
+    }
+    results.push(data);
+  }
+
+  for (let key of vacuum) {
+    localStorage.removeItem(key);
+  }
+
+  return results;
+};
+/**
+ * @param {String} key
+ * @param {any} [defaultValue]
+ */
+PassUI.storage.get = async function (key, defaultValue) {
+  let value;
+  try {
+    let valueJSON = localStorage.getItem(key);
+    if (valueJSON) {
+      value = JSON.parse(valueJSON);
+    }
+  } catch (e) {
+    // ignore
+  }
+  if (!value) {
+    value = defaultValue || null;
+  }
+  return value;
+};
+/**
+ * @param {String} key
+ * @param {any} value
+ */
+PassUI.storage.set = async function (key, value) {
+  let valueJSON = JSON.stringify(value);
+  localStorage.setItem(key, valueJSON);
+};
+
+PassUI.views = {
+  /**
+   * @param {String} str
+   * @param {Number} chunkSize
+   */
+  _splitString: function (str, chunkSize = 32, padLen = 0) {
+    let lines = [];
+
+    for (let i = 0; i < str.length; i += chunkSize) {
+      let substr = str.substr(i, chunkSize);
+      let pad = " ".repeat(padLen);
+      let padded = `${pad}${substr}`;
+      lines.push(padded);
+    }
+
+    let block = lines.join("\n");
+    block = block.trim();
+    return block;
+  },
+  credentials: {
+    render: async function () {
+      /** @type {HTMLElement} */ // @ts-ignore
+      let $tmplRow = $('template[data-tmpl="webauthn-credential"]');
+      let idsMap = await PassUI.storage.get(`webauthn:ids`);
+      let ids = Object.keys(idsMap);
+
+      let domRows = document.createDocumentFragment();
+      for (let id of ids) {
+        let reg = await PassUI.storage.get(`webauthn:cred-${id}-reg`, null);
+        let auth = await PassUI.storage.get(`webauthn:cred-${id}-auth`, null);
+        let secret = sessionStorage.getItem(`webauthn:cred-${id}-data`);
+
+        /** @type {HTMLElement} */ // @ts-ignore
+        let $row = $tmplRow.content.cloneNode(true);
+
+        let info = [];
+        if (reg) {
+          /** @type {HTMLElement} */ // @ts-ignore
+          $row.querySelector('[data-name="name"]').textContent = reg._name;
+
+          info.push(`Attachment:  ${reg.authenticatorAttachment}`);
+
+          let credId = PassUI.views._splitString(reg.id, 40, 13);
+          info.push(`Credential:  ${credId}`);
+
+          let attBytes = PassKey.base64ToBytes(reg.response.attestationObject);
+          let attHex = PassKey._bufferToHex(attBytes);
+          let att = PassUI.views._splitString(attHex, 40, 13);
+          let attObj;
+          try {
+            let CBOR = window.CBOR;
+            let cbor = CBOR.create(attBytes.buffer);
+            attObj = cbor.parse();
+            console.log(`attestation:`);
+            console.log(attObj);
+          } catch (e) {
+            console.error(e);
+          }
+          if (attObj?.attStmt?.x5c) {
+            let x5c = PassKey.bufferToBase64(attObj.attStmt.x5c[0], true);
+            let pem = PassUI.views._splitString(x5c, 64);
+            pem = `-----BEGIN CERTIFICATE-----\n${pem}\n-----END CERTIFICATE-----`;
+            let queryIter = new URLSearchParams({ cert: pem });
+            let search = queryIter.toString();
+            info.push(
+              `<a href="https://x5c.bnna.net/#/?${search}" target="_blank">Attestation</a>: ${att}`,
+            );
+          } else {
+            info.push(`Attestation: ${att}`);
+          }
+
+          let pubKeyHex = PassUI.views._splitString(
+            reg.response.publicKeyHex,
+            40,
+            13,
+          );
+          info.push(`PubKey DER:  ${pubKeyHex}`);
+          info.push(`Algorithm:   ${reg.response.publicKeyAlgorithmName}`);
+          info.push(`Transports:  ${reg.response.transports}`);
+        } else if (auth) {
+          info.push(`Attachment:  ${auth.authenticatorAttachment}`);
+          let credId = PassUI.views._splitString(auth.id, 40, 12);
+          info.push(`Credential:  ${credId}`);
+        } else if (!secret) {
+          continue;
+        }
+        info.push(`Type:        public-key`);
+
+        /** @type {HTMLElement} */ // @ts-ignore
+        $row.querySelector('[data-name="data"]').innerHTML = info.join("\n");
+
+        if (secret) {
+          /** @type {HTMLElement} */ // @ts-ignore
+          $row.querySelector('[data-name="secret"]').textContent =
+            PassUI.views._splitString(secret, 32);
+        }
+        domRows.appendChild($row);
+      }
+
+      /** @type {HTMLElement} */ // @ts-ignore
+      let $credBody = $('[data-id="webauthn-credentials"]');
+      requestAnimationFrame(function () {
+        $credBody.textContent = "";
+        $credBody.appendChild(domRows);
+      });
+    },
+  },
 };
 
 Object.assign(window, { PassUI });
@@ -789,6 +1032,19 @@ async function main() {
   console.log("WebAuthn Support?", PassKey.support);
 
   void PassUI.auth.keepAutocompleteAlive();
+
+  let idsMap = await PassUI.storage.get(`webauthn:ids`, {});
+  await PassUI.storage.set(`webauthn:ids`, idsMap);
+
+  console.log("[LISTEN] semtab:credentials");
+  document.body.addEventListener(`semtab:credentials`, function () {
+    console.log(`[semtab:credentials] render`);
+    PassUI.views.credentials.render();
+  });
+
+  //@ts-ignore
+  let SemTabs = window.SemTabs;
+  SemTabs.init({ aliases: { ids: "credentials" } });
 }
 
 main().catch(function (err) {
