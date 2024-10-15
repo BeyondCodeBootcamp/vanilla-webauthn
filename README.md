@@ -1,4 +1,4 @@
-# vanilla-webauthn
+# [Passkeys](https://github.com/BeyondCodeBootcamp/passkeys)
 
 A Simple, Vanilla WebAuthn Demo
 
